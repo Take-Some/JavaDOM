@@ -69,7 +69,7 @@ gradlew.bat bundledHtmlUiJar --console=plain --no-daemon
 Run it:
 
 ```bat
-java -jar modules\html-dom-desktopuild\libs\html-dom-ui-0.1.0-bundled.jar
+java -jar modules\html-dom-desktop\build\libs\html-dom-ui-1.0.0-bundled.jar
 ```
 
 ## Paint tree / scroll containers
@@ -86,3 +86,24 @@ paintScrollbars
 ```
 
 DevTools snapshots include layout nodes, paint nodes and scroll container nodes with content size, viewport size and scroll offsets.
+
+## CI / release / packages
+
+GitHub Actions are configured in:
+
+```text
+.github/workflows/ci.yml
+.github/workflows/release.yml
+```
+
+- `CI` runs on `main` and pull requests.
+- `Release` runs on version tags such as `v1.0.0`.
+- Maven artifacts are published to GitHub Packages under `dev.takesome:*:1.0.0`.
+- The bundled desktop showcase jar is attached to the GitHub release.
+
+Create a release locally:
+
+```bat
+git tag v1.0.0
+git push origin main v1.0.0
+```

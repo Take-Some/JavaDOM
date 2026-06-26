@@ -1,0 +1,49 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  release:
+    name: Release and publish package
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+
+      - name: Build release artifacts
+        run: .\gradlew.bat clean test packageRelease --console=plain --no-daemon
+
+      - name: Publish Maven packages to GitHub Packages
+        run: .\gradlew.bat publish --console=plain --no-daemon
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: html-dom-1.0.0-artifacts
+          path: |
+            modules/**/build/libs/*.jar
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            modules/html-dom-desktop/build/libs/html-dom-ui-*-bundled.jar
+            modules/**/build/libs/*.jar

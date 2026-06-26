@@ -3,7 +3,7 @@ plugins {
 }
 
 group = 'dev.takesome'
-version = '0.1.0'
+version = '1.0.0'
 
 ext {
     luajVersion = '3.0.1'
@@ -12,6 +12,7 @@ ext {
 
 subprojects {
     apply plugin: 'java-library'
+    apply plugin: 'maven-publish'
 
     group = rootProject.group
     version = rootProject.version
@@ -19,10 +20,17 @@ subprojects {
     java {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
+        withSourcesJar()
+        withJavadocJar()
     }
 
     tasks.withType(JavaCompile).configureEach {
         options.encoding = 'UTF-8'
+    }
+
+    tasks.withType(Javadoc).configureEach {
+        options.encoding = 'UTF-8'
+        failOnError = false
     }
 
     tasks.withType(Test).configureEach {
@@ -32,6 +40,47 @@ subprojects {
     dependencies {
         testImplementation 'org.junit.jupiter:junit-jupiter:5.10.3'
         testRuntimeOnly 'org.junit.platform:junit-platform-launcher:1.10.3'
+    }
+
+
+    publishing {
+        publications {
+            mavenJava(MavenPublication) {
+                from components.java
+                pom {
+                    name = project.name
+                    description = "HtmlDom ${project.name} module"
+                    url = 'https://github.com/Take-Some/JavaDOM'
+                    licenses {
+                        license {
+                            name = 'MIT License'
+                            url = 'https://opensource.org/licenses/MIT'
+                        }
+                    }
+                    developers {
+                        developer {
+                            id = 'take-some'
+                            name = 'Take Some'
+                        }
+                    }
+                    scm {
+                        connection = 'scm:git:https://github.com/Take-Some/JavaDOM.git'
+                        developerConnection = 'scm:git:https://github.com/Take-Some/JavaDOM.git'
+                        url = 'https://github.com/Take-Some/JavaDOM'
+                    }
+                }
+            }
+        }
+        repositories {
+            maven {
+                name = 'GitHubPackages'
+                url = uri('https://maven.pkg.github.com/Take-Some/JavaDOM')
+                credentials {
+                    username = findProperty('gpr.user') ?: System.getenv('GITHUB_ACTOR')
+                    password = findProperty('gpr.key') ?: System.getenv('GITHUB_TOKEN')
+                }
+            }
+        }
     }
 }
 
@@ -45,4 +94,11 @@ tasks.register('runBundledHtmlUi') {
     group = 'application'
     description = 'Runs the desktop JFrame HtmlDom showcase launcher.'
     dependsOn ':html-dom-desktop:run'
+}
+
+
+tasks.register('packageRelease') {
+    group = 'distribution'
+    description = 'Builds all release jars and the bundled desktop showcase jar.'
+    dependsOn 'build', 'bundledHtmlUiJar'
 }
