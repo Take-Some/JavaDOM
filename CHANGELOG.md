@@ -1,10 +1,25 @@
 # Changelog
 
-## Unreleased
+## 1.0.2 — CSS Length Tolerance Hotfix
+
+Hotfix release for malformed CSS length handling in the layout pipeline.
+
+**Authors:** Take Some()
 
 ### Fixed
 
 - Invalid CSS length values now emit a warning and fall back instead of aborting layout.
+- Multi-token mistakes such as `gap: 5px 10` no longer propagate `IllegalArgumentException` out of layout.
+- Computed length accessors now return their provided fallback for malformed length values.
+
+### Tests
+
+- Added regression coverage for invalid `gap` length input in `html-dom-core`.
+
+### Release
+
+- Version bumped to `1.0.2`.
+- Release notes for `1.0.2 CSS Length Tolerance Hotfix`.
 
 ## 1.0.1 — Documentary Release
 

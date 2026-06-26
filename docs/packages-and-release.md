@@ -6,8 +6,8 @@ HtmlDom publishes split Maven modules and an all-in-one executable package.
 
 | Field | Value |
 | --- | --- |
-| Version | `1.0.1` |
-| Release name | `Documentary Release` |
+| Version | `1.0.2` |
+| Release name | `CSS Length Tolerance Hotfix` |
 | Authors | `Take Some()` |
 | Group | `dev.takesome` |
 
@@ -16,21 +16,21 @@ HtmlDom publishes split Maven modules and an all-in-one executable package.
 Current documentary release version:
 
 ```text
-1.0.1
+1.0.2
 ```
 
 ## Maven coordinates
 
 ```gradle
 dependencies {
-    implementation 'dev.takesome:html-dom-aio:1.0.1'
+    implementation 'dev.takesome:html-dom-aio:1.0.2'
 
-    implementation 'dev.takesome:html-dom-core:1.0.1'
-    implementation 'dev.takesome:html-dom-desktop:1.0.1'
-    implementation 'dev.takesome:html-dom-fonts:1.0.1'
-    implementation 'dev.takesome:html-dom-icons-fontawesome:1.0.1'
-    implementation 'dev.takesome:html-dom-scripting-lua:1.0.1'
-    implementation 'dev.takesome:html-dom-devtools:1.0.1'
+    implementation 'dev.takesome:html-dom-core:1.0.2'
+    implementation 'dev.takesome:html-dom-desktop:1.0.2'
+    implementation 'dev.takesome:html-dom-fonts:1.0.2'
+    implementation 'dev.takesome:html-dom-icons-fontawesome:1.0.2'
+    implementation 'dev.takesome:html-dom-scripting-lua:1.0.2'
+    implementation 'dev.takesome:html-dom-devtools:1.0.2'
 }
 ```
 
@@ -59,8 +59,8 @@ gradlew.bat clean test packageRelease publishToMavenLocal --console=plain --no-d
 GitHub release and package publication are triggered by tags:
 
 ```bat
-git tag -a v1.0.1 -m "HtmlDom 1.0.1 — Documentary Release"
-git push origin main v1.0.1
+git tag -a v1.0.2 -m "HtmlDom 1.0.2 — CSS Length Tolerance Hotfix"
+git push origin main v1.0.2
 ```
 
 GitHub Packages are immutable per package/version. The release script skips existing package versions that return `409 Conflict` and continues publishing missing artifacts.
