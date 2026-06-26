@@ -100,5 +100,5 @@ tasks.register('runBundledHtmlUi') {
 tasks.register('packageRelease') {
     group = 'distribution'
     description = 'Builds all release jars and the bundled desktop showcase jar.'
-    dependsOn 'build', 'bundledHtmlUiJar'
+    dependsOn 'build', 'bundledHtmlUiJar', ':html-dom-desktop:aioJar'
 }

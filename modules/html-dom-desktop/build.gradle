@@ -33,3 +33,49 @@ tasks.register('bundledHtmlUiJar', Jar) {
         attributes 'Main-Class': application.mainClass.get()
     }
 }
+
+
+tasks.register('aioJar', Jar) {
+    group = 'distribution'
+    description = 'Builds the all-in-one executable HtmlDom Maven/runtime jar.'
+    archiveBaseName.set('html-dom-aio')
+    archiveClassifier.set('')
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    from sourceSets.main.output
+    dependsOn configurations.runtimeClasspath
+    from { configurations.runtimeClasspath.collect { it.isDirectory() ? it : zipTree(it) } }
+    manifest {
+        attributes 'Main-Class': application.mainClass.get()
+    }
+}
+
+publishing {
+    publications {
+        aio(MavenPublication) {
+            artifactId = 'html-dom-aio'
+            artifact(tasks.named('aioJar'))
+            pom {
+                name = 'HtmlDom AIO'
+                description = 'All-in-one executable HtmlDom desktop runtime jar'
+                url = 'https://github.com/Take-Some/JavaDOM'
+                licenses {
+                    license {
+                        name = 'MIT License'
+                        url = 'https://opensource.org/licenses/MIT'
+                    }
+                }
+                developers {
+                    developer {
+                        id = 'take-some'
+                        name = 'Take Some'
+                    }
+                }
+                scm {
+                    connection = 'scm:git:https://github.com/Take-Some/JavaDOM.git'
+                    developerConnection = 'scm:git:https://github.com/Take-Some/JavaDOM.git'
+                    url = 'https://github.com/Take-Some/JavaDOM'
+                }
+            }
+        }
+    }
+}

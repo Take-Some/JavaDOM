@@ -121,6 +121,10 @@ Primary dependency examples:
 
 ```gradle
 dependencies {
+    // All-in-one executable desktop runtime package:
+    implementation 'dev.takesome:html-dom-aio:1.0.0'
+
+    // Split module packages:
     implementation 'dev.takesome:html-dom-core:1.0.0'
     implementation 'dev.takesome:html-dom-desktop:1.0.0'
     implementation 'dev.takesome:html-dom-fonts:1.0.0'
@@ -128,6 +132,13 @@ dependencies {
     implementation 'dev.takesome:html-dom-scripting-lua:1.0.0'
     implementation 'dev.takesome:html-dom-devtools:1.0.0'
 }
+```
+
+Build the AIO jar locally:
+
+```bat
+gradlew.bat :html-dom-desktop:aioJar --console=plain --no-daemon
+java -jar modules\html-dom-desktop\build\libs\html-dom-aio-1.0.0.jar
 ```
 
 Local verification:
@@ -147,7 +158,7 @@ GitHub Actions are configured in:
 
 - `CI` runs on `main` and pull requests.
 - `Release` runs on version tags such as `v1.0.0`.
-- Maven artifacts are published to GitHub Packages under `dev.takesome:*:1.0.0`.
+- Maven artifacts are published to GitHub Packages under `dev.takesome:*:1.0.0`, including `dev.takesome:html-dom-aio:1.0.0`.
 - The bundled desktop showcase jar is attached to the GitHub release.
 
 Create a release locally:
