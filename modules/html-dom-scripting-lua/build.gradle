@@ -1,0 +1,4 @@
+dependencies {
+    api project(':html-dom-core')
+    api "org.luaj:luaj-jse:${rootProject.ext.luajVersion}"
+}

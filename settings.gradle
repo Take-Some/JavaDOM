@@ -1,0 +1,31 @@
+pluginManagement {
+    repositories {
+        gradlePluginPortal()
+        mavenCentral()
+        google()
+    }
+}
+dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+    repositories {
+        mavenCentral()
+        google()
+    }
+}
+rootProject.name = 'HtmlDom'
+
+include ':html-dom-core'
+include ':html-dom-logging'
+include ':html-dom-fonts'
+include ':html-dom-icons-fontawesome'
+include ':html-dom-scripting-lua'
+include ':html-dom-devtools'
+include ':html-dom-desktop'
+
+project(':html-dom-core').projectDir = file('modules/html-dom-core')
+project(':html-dom-logging').projectDir = file('modules/html-dom-logging')
+project(':html-dom-fonts').projectDir = file('modules/html-dom-fonts')
+project(':html-dom-icons-fontawesome').projectDir = file('modules/html-dom-icons-fontawesome')
+project(':html-dom-scripting-lua').projectDir = file('modules/html-dom-scripting-lua')
+project(':html-dom-devtools').projectDir = file('modules/html-dom-devtools')
+project(':html-dom-desktop').projectDir = file('modules/html-dom-desktop')

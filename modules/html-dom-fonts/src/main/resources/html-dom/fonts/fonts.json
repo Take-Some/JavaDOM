@@ -1,0 +1,9 @@
+{
+  "repository": "html-dom/fonts",
+  "fonts": [
+    { "id": "font:fs-elliot-pro-bold", "path": "FSElliotPro-Bold.ttf", "family": "" },
+    { "id": "font:fs-elliot-pro-heavy", "path": "FSElliotPro-Heavy.ttf", "family": "" },
+    { "id": "font:fs-elliot-pro", "path": "FSElliotPro.ttf", "family": "" },
+    { "id": "font:roboto-mono-regular", "path": "RobotomonoRegular.ttf", "family": "" }
+  ]
+}

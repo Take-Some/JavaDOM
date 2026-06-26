@@ -1,0 +1,227 @@
+import groovy.json.JsonOutput
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
+import java.security.MessageDigest
+import java.time.Instant
+ext.helixModuleBackupRoot = { -> file("${rootDir}/artifacts/replaced-modules") }
+ext.helixModulesDir = { -> file("${rootDir}/modules") }
+ext.helixModuleReportDir = { -> file("${rootDir}/artifacts/module-installer") }
+if (!ext.has('helixRuntimeModuleAllowlist')) {
+    ext.helixRuntimeModuleAllowlist = [
+            'engine-ai', 'engine-assets', 'engine-assets-api', 'engine-audio', 'engine-cache', 'engine-camera',
+            'engine-collections', 'engine-collision', 'engine-combat', 'engine-concurrent', 'engine-config',
+            'engine-data', 'engine-ecs', 'engine-entity', 'engine-events', 'engine-fonts', 'engine-fx',
+            'engine-icoParser', 'engine-i18n', 'engine-input', 'engine-io', 'engine-materials', 'engine-materials-api',
+            'engine-render', 'engine-scripting', 'engine-settings', 'engine-streaming', 'engine-ui', 'engine-toast', 'engine-variables'
+    ] as List<String>
+}
+ext.helixSha256 = { File file ->
+    MessageDigest digest = MessageDigest.getInstance('SHA-256')
+    file.withInputStream { input ->
+        byte[] buffer = new byte[8192]
+        int read
+        while ((read = input.read(buffer)) > 0) digest.update(buffer, 0, read)
+    }
+    digest.digest().collect { String.format('%02x', it) }.join('')
+}
+if (!ext.has('helixRuntimeModuleVersion')) {
+    ext.helixRuntimeModuleVersion = { String moduleName ->
+        String fallback = rootProject.version == null ? '0.0.0' : rootProject.version.toString()
+        if (!rootProject.ext.has('helixModuleVersionOverrides')) return fallback
+        return (rootProject.ext.helixModuleVersionOverrides.get(moduleName) ?: (rootProject.ext.has('helixBaseModuleVersion') ? rootProject.ext.helixBaseModuleVersion : fallback)).toString()
+    }
+}
+if (!ext.has('helixRuntimeModuleJarName')) {
+    ext.helixRuntimeModuleJarName = { String moduleName ->
+        return "${moduleName}-${rootProject.ext.helixRuntimeModuleVersion(moduleName)}.jar"
+    }
+}
+if (!ext.has('helixRuntimeModuleLegacyAliases')) {
+    ext.helixRuntimeModuleLegacyAliases = [
+            'engine-icons': 'engine-icoParser'
+    ] as Map<String, String>
+}
+if (!ext.has('helixRuntimeModuleOwnerForName')) {
+    ext.helixRuntimeModuleOwnerForName = { String fileName ->
+        String name = fileName == null ? '' : fileName.trim()
+        if (name.isEmpty()) return null
+        List<String> allowlist = new ArrayList<String>(rootProject.ext.helixRuntimeModuleAllowlist as List<String>)
+        Map<String, String> legacyAliases = rootProject.ext.has('helixRuntimeModuleLegacyAliases')
+                ? (rootProject.ext.helixRuntimeModuleLegacyAliases as Map<String, String>)
+                : [:]
+        allowlist.sort { a, b -> b.length() <=> a.length() }
+        for (String moduleName : allowlist) {
+            String quoted = java.util.regex.Pattern.quote(moduleName)
+            if (name == "${moduleName}.jar" || name == "${moduleName}-all.jar" || name ==~ /^${quoted}-\d+(?:\.\d+)*(?:[-+][A-Za-z0-9._-]+)?\.jar$/) {
+                return moduleName
+            }
+        }
+        for (Map.Entry<String, String> alias : legacyAliases.entrySet()) {
+            String legacyName = alias.key
+            String canonicalName = alias.value
+            if (!allowlist.contains(canonicalName)) continue
+            String quoted = java.util.regex.Pattern.quote(legacyName)
+            if (name == "${legacyName}.jar" || name == "${legacyName}-all.jar" || name ==~ /^${quoted}-\d+(?:\.\d+)*(?:[-+][A-Za-z0-9._-]+)?\.jar$/) {
+                return canonicalName
+            }
+        }
+        return null
+    }
+}
+ext.helixTryArchive = { File source, File backupDir, List records ->
+    if (source == null || !source.exists()) return false
+    backupDir.mkdirs()
+    File target = new File(backupDir, source.name)
+    try {
+        if (target.exists()) target.delete()
+        Files.move(source.toPath(), target.toPath(), StandardCopyOption.REPLACE_EXISTING)
+        records.add([action: 'archived', source: source.path, target: target.path])
+        return true
+    } catch (Exception moveFailure) {
+        try {
+            Files.copy(source.toPath(), target.toPath(), StandardCopyOption.REPLACE_EXISTING)
+            records.add([action: 'copied-locked', source: source.path, target: target.path, warning: moveFailure.toString()])
+            return false
+        } catch (Exception copyFailure) {
+            records.add([action: 'locked', source: source.path, warning: moveFailure.toString(), copyWarning: copyFailure.toString()])
+            return false
+        }
+    }
+}
+ext.helixInstallJar = { File source, File target, List records ->
+    if (source == null || !source.exists()) {
+        throw new GradleException("Missing module jar: ${source}")
+    }
+    target.parentFile.mkdirs()
+    Files.copy(source.toPath(), target.toPath(), StandardCopyOption.REPLACE_EXISTING)
+    records.add([action: 'installed', source: source.path, target: target.path, size: target.length(), sha256: helixSha256(target)])
+}
+ext.helixWriteReport = { String name, Map report ->
+    File reportDir = helixModuleReportDir()
+    reportDir.mkdirs()
+    File out = new File(reportDir, name)
+    out.text = JsonOutput.prettyPrint(JsonOutput.toJson(report)) + System.lineSeparator()
+    out
+}
+ext.helixArchiveModuleCopies = { String moduleName, String version, List records ->
+    File modulesDir = helixModulesDir()
+    File backupDir = new File(helixModuleBackupRoot(), "${moduleName}-${version}")
+    if (!modulesDir.exists()) return
+    String expectedName = rootProject.ext.helixRuntimeModuleJarName(moduleName)
+    modulesDir.listFiles()?.findAll { File file ->
+        rootProject.ext.helixRuntimeModuleOwnerForName(file.name) == moduleName && file.name != expectedName
+    }?.each { File old ->
+        helixTryArchive(old, backupDir, records)
+    }
+}
+subprojects { subproject ->
+    tasks.register('installModule') {
+        group = 'distribution'
+        description = 'Builds and installs exactly one versioned thin runtime jar into root modules/.'
+        dependsOn subproject.tasks.named('jar')
+        doLast {
+            String moduleName = subproject.name
+            String moduleVersion = subproject.version.toString()
+            List<String> allowlist = (rootProject.ext.helixRuntimeModuleAllowlist as List<String>)
+            if (!allowlist.contains(moduleName)) {
+                throw new GradleException("Module '${moduleName}' is not runtime-safe. Add it to helixRuntimeModuleAllowlist before installing.")
+            }
+            File libsDir = new File(subproject.buildDir, 'libs')
+            File thin = new File(libsDir, "${moduleName}-${moduleVersion}.jar")
+            File versionedThin = new File(helixModulesDir(), rootProject.ext.helixRuntimeModuleJarName(moduleName))
+            List records = []
+            helixArchiveModuleCopies(moduleName, moduleVersion, records)
+            helixInstallJar(thin, versionedThin, records)
+            File report = helixWriteReport("install-${moduleName}-${moduleVersion}.json", [
+                    schema: 'takesome.module_installer.v3',
+                    policy: 'single-versioned-thin-jar',
+                    module: moduleName,
+                    version: moduleVersion,
+                    jar: versionedThin.name,
+                    generatedAt: Instant.now().toString(),
+                    records: records
+            ])
+            logger.lifecycle("Installed versioned runtime jar ${versionedThin.name}; report=${report}")
+        }
+    }
+}
+tasks.register('cleanInstalledModules') {
+    group = 'distribution'
+    description = 'Keeps exactly one versioned thin jar per allowlisted runtime module in root modules/.'
+    doLast {
+        File modulesDir = helixModulesDir()
+        List<String> allowlist = (rootProject.ext.helixRuntimeModuleAllowlist as List<String>)
+        List records = []
+        if (!modulesDir.exists()) {
+            logger.lifecycle("No modules directory: ${modulesDir}")
+            return
+        }
+        modulesDir.listFiles()?.findAll { File file ->
+            file.name.endsWith('.jar') || file.name.endsWith('.tmp')
+        }?.each { File file ->
+            String owner = rootProject.ext.helixRuntimeModuleOwnerForName(file.name)
+            if (owner != null) {
+                String expectedName = rootProject.ext.helixRuntimeModuleJarName(owner)
+                if (file.name != expectedName) {
+                    helixTryArchive(file, new File(helixModuleBackupRoot(), "${owner}-versioned-jar-cleanup"), records)
+                }
+            }
+        }
+        File report = helixWriteReport("clean-installed-modules.json", [
+                schema: 'takesome.module_cleaner.v2',
+                policy: 'one-versioned-jar-per-runtime-module',
+                generatedAt: Instant.now().toString(),
+                allowlist: allowlist,
+                records: records
+        ])
+        logger.lifecycle("Module cleanup complete; one jar per runtime module; report=${report}")
+    }
+}
+tasks.register('installAllRuntimeModules') {
+    group = 'distribution'
+    description = 'Builds and installs exactly one jar for each runtime-safe module from helixRuntimeModuleAllowlist.'
+    List<String> allowlist = (rootProject.ext.helixRuntimeModuleAllowlist as List<String>)
+    List<String> missing = []
+    allowlist.each { String moduleName ->
+        Project runtimeProject = rootProject.findProject(":${moduleName}")
+        if (runtimeProject == null) {
+            missing.add(moduleName)
+        } else {
+            dependsOn runtimeProject.tasks.named('installModule')
+        }
+    }
+    finalizedBy tasks.named('cleanInstalledModules')
+    doFirst {
+        if (!missing.isEmpty()) {
+            throw new GradleException("Runtime module allowlist contains missing projects: ${missing}")
+        }
+    }
+    doLast {
+        File modulesDir = helixModulesDir()
+        List<Map> active = []
+        allowlist.each { String moduleName ->
+            File versioned = new File(modulesDir, rootProject.ext.helixRuntimeModuleJarName(moduleName))
+            if (versioned.exists()) {
+                active.add([module: moduleName, alias: versioned.name, version: rootProject.ext.helixRuntimeModuleVersion(moduleName), path: versioned.path, size: versioned.length(), sha256: helixSha256(versioned)])
+            }
+        }
+        File report = helixWriteReport("install-runtime-modules-${rootProject.version}.json", [
+                schema: 'takesome.runtime_module_installer.v2',
+                policy: 'one-versioned-jar-per-runtime-module',
+                version: rootProject.version.toString(),
+                generatedAt: Instant.now().toString(),
+                allowlist: allowlist,
+                excluded: rootProject.subprojects.collect { it.name }.findAll { !allowlist.contains(it) }.sort(),
+                active: active
+        ])
+        logger.lifecycle("Installed one runtime jar for each allowlisted module (${active.size()} jars); report=${report}")
+    }
+}
+// HELIX_BUILD_DEPENDENTS_MODULE_EXPORT
+// Public contract: `gradle buildDependents` must also refresh root modules/.
+// `installAllRuntimeModules` builds the allowlisted engine module jars and copies
+// them into root modules/ as <module>-<version>.jar, followed by stale-jar cleanup.
+tasks.named('buildDependents') {
+    description = 'Builds this project and its dependents, then exports runtime modules into root modules/.'
+    dependsOn tasks.named('installAllRuntimeModules')
+}

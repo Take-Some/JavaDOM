@@ -1,0 +1,7 @@
+dev.takesome.htmldom.css.units.unitTypes.AutoCssUnitAdapter
+dev.takesome.htmldom.css.units.unitTypes.PxCssUnitAdapter
+dev.takesome.htmldom.css.units.unitTypes.PercentCssUnitAdapter
+dev.takesome.htmldom.css.units.unitTypes.PtCssUnitAdapter
+dev.takesome.htmldom.css.units.unitTypes.RemCssUnitAdapter
+dev.takesome.htmldom.css.units.unitTypes.VwCssUnitAdapter
+dev.takesome.htmldom.css.units.unitTypes.VhCssUnitAdapter

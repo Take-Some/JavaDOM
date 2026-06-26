@@ -1,0 +1,48 @@
+plugins {
+    id 'base'
+}
+
+group = 'dev.takesome'
+version = '0.1.0'
+
+ext {
+    luajVersion = '3.0.1'
+    jansiVersion = '2.4.1'
+}
+
+subprojects {
+    apply plugin: 'java-library'
+
+    group = rootProject.group
+    version = rootProject.version
+
+    java {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
+
+    tasks.withType(JavaCompile).configureEach {
+        options.encoding = 'UTF-8'
+    }
+
+    tasks.withType(Test).configureEach {
+        useJUnitPlatform()
+    }
+
+    dependencies {
+        testImplementation 'org.junit.jupiter:junit-jupiter:5.10.3'
+        testRuntimeOnly 'org.junit.platform:junit-platform-launcher:1.10.3'
+    }
+}
+
+tasks.register('bundledHtmlUiJar') {
+    group = 'distribution'
+    description = 'Builds executable desktop JFrame HtmlDom showcase jar.'
+    dependsOn ':html-dom-desktop:bundledHtmlUiJar'
+}
+
+tasks.register('runBundledHtmlUi') {
+    group = 'application'
+    description = 'Runs the desktop JFrame HtmlDom showcase launcher.'
+    dependsOn ':html-dom-desktop:run'
+}

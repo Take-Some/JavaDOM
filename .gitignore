@@ -1,0 +1,23 @@
+*.class
+*.war
+*.ear
+build/
+out/
+.gradle/
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+/artifacts/
+/crash-reports/
+assets/logs/helix.log
+# Runtime/build byproducts
+*.log
+hs_err_pid*.log
+/tmp/
+/tmp/**
+/build/runtime-icons/
+modulesSrc/**/logs/
+# Installed runtime module artifacts are produced by installAllRuntimeModules.
+/modules/*.jar
+/logs/

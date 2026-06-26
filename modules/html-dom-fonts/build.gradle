@@ -1,0 +1,4 @@
+dependencies {
+    api project(':html-dom-core')
+    api project(':html-dom-logging')
+}

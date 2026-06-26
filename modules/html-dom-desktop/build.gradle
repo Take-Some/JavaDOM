@@ -1,0 +1,35 @@
+plugins {
+    id 'application'
+}
+
+dependencies {
+    api project(':html-dom-core')
+    api project(':html-dom-fonts')
+    api project(':html-dom-icons-fontawesome')
+    api project(':html-dom-scripting-lua')
+    api project(':html-dom-devtools')
+}
+
+application {
+    mainClass = 'dev.takesome.htmldom.bundled.BundledHtmlUi'
+}
+
+tasks.named('jar') {
+    manifest {
+        attributes 'Main-Class': application.mainClass.get()
+    }
+}
+
+tasks.register('bundledHtmlUiJar', Jar) {
+    group = 'distribution'
+    description = 'Builds executable desktop JFrame HtmlDom showcase jar.'
+    archiveBaseName.set('html-dom-ui')
+    archiveClassifier.set('bundled')
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    from sourceSets.main.output
+    dependsOn configurations.runtimeClasspath
+    from { configurations.runtimeClasspath.collect { it.isDirectory() ? it : zipTree(it) } }
+    manifest {
+        attributes 'Main-Class': application.mainClass.get()
+    }
+}
