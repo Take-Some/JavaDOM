@@ -411,22 +411,22 @@ public final class UiCssLayoutEngine {
 
     private float explicitOffset(UiDomElement element, Axis axis, float size, float reference, UiCssLength fallback) {
         String raw = axis.primary(this).raw(element);
-        if (!raw.isBlank()) return offset(axis, raw, size, reference);
+        if (!raw.isBlank()) return offset(element, axis, raw, size, reference);
         raw = axis.startProperty(this).raw(element);
-        if (!raw.isBlank()) return offset(axis, raw, size, reference);
+        if (!raw.isBlank()) return offset(element, axis, raw, size, reference);
         raw = axis.endProperty(this).raw(element);
-        if (!raw.isBlank()) return Math.max(0f, reference - size - UiCssLength.parse(raw).resolve(lengthContext, reference, 0f));
+        if (!raw.isBlank()) return Math.max(0f, reference - size - resolveLength(element, axis.endProperty(this).name(), raw, reference, 0f));
         return fallback.resolve(lengthContext, reference, 0f);
     }
 
-    private float offset(Axis axis, String raw, float size, float reference) {
+    private float offset(UiDomElement element, Axis axis, String raw, float size, float reference) {
         String value = raw.trim().toLowerCase(Locale.ROOT);
         if (axis.start(value)) return 0f;
         if (axis.end(value)) return reference - size;
         if (Axis.CENTER.matches(value)) return (reference - size) * 0.5f;
         try {
-            return UiCssLength.parse(value).resolve(lengthContext, reference, 0f);
-        } catch (IllegalArgumentException ex) {
+            return resolveLength(element, axis.primary(this).name(), value, reference, 0f);
+        } catch (RuntimeException ex) {
             warnOnce("offset|" + raw, "UI CSS layout invalid offset raw='{}' axis={} reference={} size={} reason='{}'", raw, axis, reference, size, ex.getMessage());
             return 0f;
         }
@@ -465,7 +465,12 @@ public final class UiCssLayoutEngine {
 
     private UiCssLength safeLength(String raw, UiCssLength fallback, boolean intrinsic) {
         if (raw == null || raw.isBlank() || intrinsic) return fallback;
-        return UiCssLength.parse(raw);
+        try {
+            return UiCssLength.parse(raw);
+        } catch (RuntimeException exception) {
+            warnInvalidLength(null, "length", raw, fallback == null ? UiCssLength.AUTO : fallback, exception);
+            return fallback;
+        }
     }
 
     private boolean intrinsicWidthRequested(UiDomElement element, String rawWidth) {
@@ -566,7 +571,7 @@ public final class UiCssLayoutEngine {
         if (intrinsicWidthRequested(element, raw) || (hasInlineContent(element) && (raw.isBlank() || percentLength(raw)))) {
             return intrinsicWidth(element, reference, 0f);
         }
-        if (!raw.isBlank()) return UiCssLength.parse(raw).resolve(lengthContext, reference, 0f);
+        if (!raw.isBlank()) return resolveLength(element, width.name(), raw, reference, 0f);
         return Math.max(maxContentTextWidth(element), intrinsicChildrenWidth(element, reference));
     }
 
@@ -577,7 +582,7 @@ public final class UiCssLayoutEngine {
     private float preferredHeight(UiDomElement element, float referenceW, float referenceH) {
         String raw = height.raw(element);
         if (intrinsicHeightRequested(raw)) return intrinsicHeight(element, referenceW, referenceH, 0f);
-        if (!raw.isBlank()) return UiCssLength.parse(raw).resolve(lengthContext, referenceH, 0f);
+        if (!raw.isBlank()) return resolveLength(element, height.name(), raw, referenceH, 0f);
         if (hasInlineContent(element)) return intrinsicHeight(element, referenceW, referenceH, 0f);
         return intrinsicChildrenHeight(element, referenceW, referenceH);
     }
@@ -1056,6 +1061,28 @@ public final class UiCssLayoutEngine {
             warnOnce("number|" + property + '|' + raw + '|' + summary(element), "UI CSS layout invalid number element={} property='{}' raw='{}' fallback={}", summary(element), property, raw, fallback);
             return fallback;
         }
+    }
+
+    private float resolveLength(UiDomElement element, String property, String raw, float reference, float fallback) {
+        if (raw == null || raw.isBlank()) return fallback;
+        try {
+            return UiCssLength.parse(raw).resolve(lengthContext, reference, fallback);
+        } catch (RuntimeException exception) {
+            warnInvalidLength(element, property, raw, new UiCssLength(fallback, "px"), exception);
+            return fallback;
+        }
+    }
+
+    private void warnInvalidLength(UiDomElement element, String property, String raw, UiCssLength fallback, RuntimeException exception) {
+        warnOnce(
+                "layout-length|" + property + '|' + raw,
+                "UI CSS layout invalid length element={} property='{}' raw='{}'; using fallback='{}' reason='{}'",
+                summary(element),
+                property,
+                raw,
+                fallback == null ? "auto" : fallback.cssText(),
+                exception.getMessage()
+        );
     }
 
     private String alignSelf(UiDomElement element, String parentAlign) {

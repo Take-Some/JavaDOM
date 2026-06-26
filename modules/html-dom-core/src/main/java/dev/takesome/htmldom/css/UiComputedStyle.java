@@ -31,7 +31,12 @@ public record UiComputedStyle(Map<String, String> values) {
 
     public UiCssLength length(String property, UiCssLength fallback) {
         String value = get(property, "");
-        return value.isBlank() ? fallback : UiCssLength.parse(value);
+        if (value.isBlank()) return fallback;
+        try {
+            return UiCssLength.parse(value);
+        } catch (RuntimeException ignored) {
+            return fallback;
+        }
     }
 
     private static String normalize(String property) {

@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- Invalid CSS length values now emit a warning and fall back instead of aborting layout.
+
 ## 1.0.1 — Documentary Release
 
 This release focuses on documentation and release hygiene for the standalone HtmlDom repository.
