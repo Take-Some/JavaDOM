@@ -98,6 +98,44 @@ paintScrollbars
 
 DevTools snapshots include layout nodes, paint nodes and scroll container nodes with content size, viewport size and scroll offsets.
 
+
+## Maven package
+
+Artifacts are published as GitHub Packages when a release tag such as `v1.0.0` is pushed.
+
+Gradle repository setup:
+
+```gradle
+repositories {
+    maven {
+        url = uri('https://maven.pkg.github.com/Take-Some/JavaDOM')
+        credentials {
+            username = findProperty('gpr.user') ?: System.getenv('GITHUB_ACTOR')
+            password = findProperty('gpr.key') ?: System.getenv('GITHUB_TOKEN')
+        }
+    }
+}
+```
+
+Primary dependency examples:
+
+```gradle
+dependencies {
+    implementation 'dev.takesome:html-dom-core:1.0.0'
+    implementation 'dev.takesome:html-dom-desktop:1.0.0'
+    implementation 'dev.takesome:html-dom-fonts:1.0.0'
+    implementation 'dev.takesome:html-dom-icons-fontawesome:1.0.0'
+    implementation 'dev.takesome:html-dom-scripting-lua:1.0.0'
+    implementation 'dev.takesome:html-dom-devtools:1.0.0'
+}
+```
+
+Local verification:
+
+```bat
+gradlew.bat publishToMavenLocal --console=plain --no-daemon
+```
+
 ## CI / release / packages
 
 GitHub Actions are configured in:
