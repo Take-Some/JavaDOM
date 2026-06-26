@@ -3,7 +3,7 @@ plugins {
 }
 
 group = 'dev.takesome'
-version = '1.0.3'
+version = '1.0.4'
 
 ext {
     luajVersion = '3.0.1'

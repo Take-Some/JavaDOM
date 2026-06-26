@@ -191,7 +191,7 @@ public final class UiCssLayoutEngine {
         float cursor = flow == Flow.COLUMN ? textBlockHeight(parent, contentWidth) : 0f;
         for (UiDomNode childNode : parent.children()) {
             if (!(childNode instanceof UiDomElement child)) continue;
-            if (inlineParticipant(child)) continue;
+            if (inlineParticipant(child) && !outOfFlow(child)) continue;
             UiCssBox childBox = childBox(parentBox, insets, flow, cursor, child);
             Insets m = margin(child, parentBox);
             cursor += (flow == Flow.ROW ? childBox.width() + m.left + m.right : childBox.height() + m.top + m.bottom) + resolvedGap;
