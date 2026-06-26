@@ -9,11 +9,31 @@ Desktop HTML-like UI library extracted into a standalone multi-module repository
 This is a desktop stack, not browser/WebView: retained DOM, HTML-like markup, CSS cascade/layout, Lua scripting as the JavaScript replacement, font registry, Font Awesome registry, and a Swing/JFrame renderer.
 
 
+## Release identity
+
+- Current version: `1.0.1`
+- Release name: `Documentary Release`
+- Authors: `Take Some()`
+- Primary package group: `dev.takesome`
+
+
 ## Screenshots
 
 <p align="center">
   <img src="docs/images/devtools-runtime.svg" alt="HtmlDom desktop UI and DevTools runtime" width="900"/>
 </p>
+
+
+## Documentation
+
+- [Architecture overview](docs/architecture.md)
+- [Desktop runtime](docs/desktop-runtime.md)
+- [CSS, layout and paint pipeline](docs/css-layout-paint.md)
+- [DevTools and runtime editing](docs/devtools.md)
+- [Lua scripting ABI](docs/lua-scripting.md)
+- [Packages and release process](docs/packages-and-release.md)
+- [1.0.1 Documentary Release notes](docs/releases/1.0.1-documentary-release.md)
+- [Authors](AUTHORS.md)
 
 ## Modules
 
@@ -80,7 +100,7 @@ gradlew.bat bundledHtmlUiJar --console=plain --no-daemon
 Run it:
 
 ```bat
-java -jar modules\html-dom-desktop\build\libs\html-dom-ui-1.0.0-bundled.jar
+java -jar modules\html-dom-desktop\build\libs\html-dom-ui-1.0.1-bundled.jar
 ```
 
 ## Paint tree / scroll containers
@@ -101,7 +121,7 @@ DevTools snapshots include layout nodes, paint nodes and scroll container nodes 
 
 ## Maven package
 
-Artifacts are published as GitHub Packages when a release tag such as `v1.0.0` is pushed.
+Artifacts are published as GitHub Packages when a release tag such as `v1.0.1` is pushed.
 
 Gradle repository setup:
 
@@ -122,15 +142,15 @@ Primary dependency examples:
 ```gradle
 dependencies {
     // All-in-one executable desktop runtime package:
-    implementation 'dev.takesome:html-dom-aio:1.0.0'
+    implementation 'dev.takesome:html-dom-aio:1.0.1'
 
     // Split module packages:
-    implementation 'dev.takesome:html-dom-core:1.0.0'
-    implementation 'dev.takesome:html-dom-desktop:1.0.0'
-    implementation 'dev.takesome:html-dom-fonts:1.0.0'
-    implementation 'dev.takesome:html-dom-icons-fontawesome:1.0.0'
-    implementation 'dev.takesome:html-dom-scripting-lua:1.0.0'
-    implementation 'dev.takesome:html-dom-devtools:1.0.0'
+    implementation 'dev.takesome:html-dom-core:1.0.1'
+    implementation 'dev.takesome:html-dom-desktop:1.0.1'
+    implementation 'dev.takesome:html-dom-fonts:1.0.1'
+    implementation 'dev.takesome:html-dom-icons-fontawesome:1.0.1'
+    implementation 'dev.takesome:html-dom-scripting-lua:1.0.1'
+    implementation 'dev.takesome:html-dom-devtools:1.0.1'
 }
 ```
 
@@ -138,7 +158,7 @@ Build the AIO jar locally:
 
 ```bat
 gradlew.bat :html-dom-desktop:aioJar --console=plain --no-daemon
-java -jar modules\html-dom-desktop\build\libs\html-dom-aio-1.0.0.jar
+java -jar modules\html-dom-desktop\build\libs\html-dom-aio-1.0.1.jar
 ```
 
 Local verification:
@@ -146,6 +166,11 @@ Local verification:
 ```bat
 gradlew.bat publishToMavenLocal --console=plain --no-daemon
 ```
+
+
+## Authors
+
+- Take Some()
 
 ## CI / release / packages
 
@@ -157,13 +182,13 @@ GitHub Actions are configured in:
 ```
 
 - `CI` runs on `main` and pull requests.
-- `Release` runs on version tags such as `v1.0.0`.
-- Maven artifacts are published to GitHub Packages under `dev.takesome:*:1.0.0`, including `dev.takesome:html-dom-aio:1.0.0`.
+- `Release` runs on version tags such as `v1.0.1`.
+- Maven artifacts are published to GitHub Packages under `dev.takesome:*:1.0.1`, including `dev.takesome:html-dom-aio:1.0.1`.
 - The bundled desktop showcase jar is attached to the GitHub release.
 
 Create a release locally:
 
 ```bat
-git tag v1.0.0
-git push origin main v1.0.0
+git tag -a v1.0.1 -m "HtmlDom 1.0.1 — Documentary Release"
+git push origin main v1.0.1
 ```

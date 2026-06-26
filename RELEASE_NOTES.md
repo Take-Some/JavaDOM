@@ -1,0 +1,42 @@
+# HtmlDom 1.0.1 — Documentary Release
+
+**Authors:** Take Some()
+
+HtmlDom 1.0.1 is a documentation and release-hygiene release for the standalone desktop HTML-like UI stack.
+
+## Release scope
+
+- Adds a repository documentation index and module-level architecture map.
+- Documents the retained DOM, tolerant HTML-like parser, CSS cascade, layout engine, Java2D paint phases and desktop runtime loop.
+- Documents the custom DevTools surface, runtime editing workflow, layout/paint snapshots, hit targets and event log.
+- Documents Lua scripting as the runtime scripting ABI used instead of browser JavaScript.
+- Documents Maven coordinates for split modules and the all-in-one `html-dom-aio` runtime artifact.
+- Keeps GitHub Packages publishing idempotent for immutable package versions.
+
+## Package coordinates
+
+```gradle
+dependencies {
+    implementation 'dev.takesome:html-dom-aio:1.0.1'
+
+    implementation 'dev.takesome:html-dom-core:1.0.1'
+    implementation 'dev.takesome:html-dom-desktop:1.0.1'
+    implementation 'dev.takesome:html-dom-fonts:1.0.1'
+    implementation 'dev.takesome:html-dom-icons-fontawesome:1.0.1'
+    implementation 'dev.takesome:html-dom-scripting-lua:1.0.1'
+    implementation 'dev.takesome:html-dom-devtools:1.0.1'
+}
+```
+
+## Local verification
+
+```bat
+gradlew.bat clean test packageRelease --console=plain --no-daemon
+```
+
+## Release trigger
+
+```bat
+git tag -a v1.0.1 -m "HtmlDom 1.0.1 — Documentary Release"
+git push origin main v1.0.1
+```

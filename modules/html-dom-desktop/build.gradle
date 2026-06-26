@@ -67,7 +67,7 @@ publishing {
                 developers {
                     developer {
                         id = 'take-some'
-                        name = 'Take Some'
+                        name = 'Take Some()'
                     }
                 }
                 scm {
