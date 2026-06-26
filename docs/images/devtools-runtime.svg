@@ -1,0 +1,47 @@
+<svg width="1280" height="760" viewBox="0 0 1280 760" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="page" x1="0" y1="0" x2="1280" y2="760" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#06101d"/>
+      <stop offset="1" stop-color="#091729"/>
+    </linearGradient>
+    <linearGradient id="card1" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#10243e"/><stop offset="1" stop-color="#17385d"/>
+    </linearGradient>
+    <linearGradient id="card2" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#1e1639"/><stop offset="1" stop-color="#321b60"/>
+    </linearGradient>
+    <filter id="drop"><feDropShadow dx="0" dy="18" stdDeviation="20" flood-color="#000" flood-opacity="0.35"/></filter>
+  </defs>
+  <rect width="1280" height="760" fill="url(#page)"/>
+  <rect x="38" y="42" width="1204" height="310" rx="18" fill="#0d1a2d" stroke="#355274"/>
+  <rect x="66" y="70" width="42" height="42" rx="10" fill="#56B8FF"/><text x="87" y="100" text-anchor="middle" font-family="Arial" font-size="24" fill="white" font-weight="800">H</text>
+  <text x="126" y="88" font-family="Segoe UI,Arial" font-size="18" fill="white" font-weight="700">Helix UI</text>
+  <text x="126" y="112" font-family="Roboto Mono,Consolas,monospace" font-size="12" fill="#8ea5bd">Interactive desktop demo</text>
+  <text x="66" y="190" font-family="Segoe UI,Arial" font-size="34" fill="#f8fafc" font-weight="800">Simple interface page</text>
+  <text x="66" y="232" font-family="Segoe UI,Arial" font-size="34" fill="#f8fafc" font-weight="800">with working actions.</text>
+  <rect x="66" y="306" width="132" height="36" rx="8" fill="#5AA9FF"/><text x="132" y="329" text-anchor="middle" font-family="Roboto Mono,Consolas,monospace" font-size="12" fill="white" font-weight="700">Open preview</text>
+  <rect x="208" y="306" width="142" height="36" rx="8" fill="#10243e" stroke="#55b5ff"/><text x="279" y="329" text-anchor="middle" font-family="Roboto Mono,Consolas,monospace" font-size="12" fill="white" font-weight="700">Read details</text>
+  <rect x="790" y="90" width="340" height="182" rx="14" fill="#22163d" stroke="#526ca0"/>
+  <rect x="816" y="116" width="288" height="54" rx="12" fill="#5dd6e8"/>
+  <rect x="816" y="184" width="288" height="54" rx="12" fill="#d858d4"/>
+  <text x="816" y="260" font-family="Segoe UI,Arial" font-size="24" fill="white" font-weight="800">UI Surface</text>
+  <rect x="38" y="372" width="352" height="126" rx="12" fill="url(#card1)" stroke="#39526f"/>
+  <rect x="412" y="372" width="352" height="126" rx="12" fill="url(#card2)" stroke="#5c5687"/>
+  <rect x="786" y="372" width="352" height="126" rx="12" fill="#113d49" stroke="#4b7382"/>
+  <text x="70" y="432" font-family="Segoe UI,Arial" font-size="24" fill="#f8fafc" font-weight="800">Layout</text>
+  <text x="444" y="432" font-family="Segoe UI,Arial" font-size="24" fill="#f8fafc" font-weight="800">Styling</text>
+  <text x="818" y="432" font-family="Segoe UI,Arial" font-size="24" fill="#f8fafc" font-weight="800">Runtime</text>
+  <text x="70" y="480" font-family="Roboto Mono,Consolas,monospace" font-size="13" fill="#b8c7d9">Stable rows, clean spacing and readable surfaces.</text>
+  <g filter="url(#drop)">
+    <rect x="52" y="524" width="610" height="196" rx="18" fill="#F8FAFC"/>
+    <text x="78" y="560" font-family="Roboto Mono,Consolas,monospace" font-size="13" fill="#0f172a">HtmlDom DevTools — Elements</text>
+    <rect x="80" y="586" width="230" height="112" rx="12" fill="#111827"/>
+    <text x="102" y="612" font-family="Roboto Mono,Consolas,monospace" font-size="12" fill="#60A5FA">&lt;section class="feature-card"&gt;</text>
+    <text x="126" y="638" font-family="Roboto Mono,Consolas,monospace" font-size="12" fill="#FBBF24">border-radius</text>
+    <text x="126" y="662" font-family="Roboto Mono,Consolas,monospace" font-size="12" fill="#FBBF24">background-image</text>
+    <rect x="334" y="586" width="300" height="112" rx="12" fill="#111827"/>
+    <text x="356" y="612" font-family="Roboto Mono,Consolas,monospace" font-size="12" fill="#94A3B8">Computed styles</text>
+    <text x="356" y="638" font-family="Roboto Mono,Consolas,monospace" font-size="12" fill="#E5E7EB">display: flex</text>
+    <text x="356" y="662" font-family="Roboto Mono,Consolas,monospace" font-size="12" fill="#E5E7EB">height: 156px</text>
+  </g>
+</svg>
