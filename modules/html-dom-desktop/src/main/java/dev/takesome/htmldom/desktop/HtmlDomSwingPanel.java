@@ -171,6 +171,11 @@ public final class HtmlDomSwingPanel extends JPanel implements HtmlDomInputRoute
         return focusController;
     }
 
+    public void invalidateLayout() {
+        layout = null;
+        repaint();
+    }
+
     @Override public void repaintHost() {
         repaint();
     }

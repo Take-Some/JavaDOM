@@ -361,8 +361,27 @@ public final class UiCssLayoutEngine {
         float w = clampWidth(element, resolveBoxSizedWidth(element, wLength.resolve(lengthContext, referenceW, fallbackW), referenceW, explicitBounds != null || (!rawWidth.isBlank() && !intrinsicWidth)), referenceW);
         float h = clampHeight(element, resolveBoxSizedHeight(element, hLength.resolve(lengthContext, referenceH, fallbackH), referenceH, explicitBounds != null || (!rawHeight.isBlank() && !intrinsicHeight)), referenceH);
         float x0 = originX + resolveExplicitOffset(element, explicitBounds, Axis.X, w, referenceW);
-        float y0 = originY + resolveExplicitOffset(element, explicitBounds, Axis.Y, h, referenceH);
+        float y0 = resolveExplicitY(element, explicitBounds, originY, referenceH, h);
         return new UiCssBox(x0, y0, w, h);
+    }
+
+    private float resolveExplicitY(UiDomElement element, UiCssBounds explicitBounds, float originY, float referenceH, float height) {
+        if (explicitBounds != null) {
+            return originY + explicitBounds.y().resolve(lengthContext, referenceH, 0f);
+        }
+        String raw = y.raw(element);
+        if (!raw.isBlank()) {
+            return originY + referenceH - height - offset(element, Axis.Y, raw, height, referenceH);
+        }
+        raw = top.raw(element);
+        if (!raw.isBlank()) {
+            return originY + referenceH - height - offset(element, Axis.Y, raw, height, referenceH);
+        }
+        raw = bottom.raw(element);
+        if (!raw.isBlank()) {
+            return originY + resolveLength(element, bottom.name(), raw, referenceH, 0f);
+        }
+        return originY;
     }
 
     private float resolveExplicitOffset(UiDomElement element, UiCssBounds explicitBounds, Axis axis, float size, float reference) {
