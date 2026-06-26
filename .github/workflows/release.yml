@@ -29,7 +29,8 @@ jobs:
         run: .\gradlew.bat clean test packageRelease --console=plain --no-daemon
 
       - name: Publish Maven packages to GitHub Packages
-        run: .\gradlew.bat publish --console=plain --no-daemon
+        shell: pwsh
+        run: .\.github\scripts\publish-packages.ps1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -45,5 +46,6 @@ jobs:
         with:
           generate_release_notes: true
           files: |
+            modules/html-dom-desktop/build/libs/html-dom-aio-*.jar
             modules/html-dom-desktop/build/libs/html-dom-ui-*-bundled.jar
             modules/**/build/libs/*.jar
