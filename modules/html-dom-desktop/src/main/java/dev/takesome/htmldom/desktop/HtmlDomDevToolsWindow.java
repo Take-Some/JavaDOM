@@ -45,6 +45,7 @@ import java.util.Map;
 
 /** Chrome-like Elements DOM viewer painted by HtmlDom itself: no Swing tables/tree sheet. */
 public final class HtmlDomDevToolsWindow {
+    private static final String DEVTOOLS_ALWAYS_ON_TOP_PROPERTY = "htmldom.devtools.alwaysOnTop";
     private static final Color BG = new Color(31, 32, 35);
     private static final Color PANEL = new Color(38, 39, 42);
     private static final Color CARD = new Color(43, 44, 48);
@@ -120,18 +121,32 @@ public final class HtmlDomDevToolsWindow {
     private void openOnEdt() {
         if (frame == null || !frame.isDisplayable()) {
             frame = new JFrame("HtmlDom DevTools — Elements");
+            frame.setName("HtmlDom DevTools");
+            frame.setAutoRequestFocus(true);
             frame.setDefaultCloseOperation(JFrame.HIDE_ON_CLOSE);
             frame.setContentPane(canvas);
             frame.setSize(1220, 780);
             frame.setMinimumSize(new Dimension(900, 560));
             frame.setLocationByPlatform(true);
         }
+        frame.setAlwaysOnTop(alwaysOnTop());
         if (selectedNodeId <= 0) selectedNodeId = inspected.document().documentElement().nodeId();
         canvas.rebuildRows();
         canvas.repaint();
         frame.setVisible(true);
-        canvas.requestFocusInWindow();
+        raiseDevToolsWindow();
+        SwingUtilities.invokeLater(this::raiseDevToolsWindow);
+    }
+
+    private boolean alwaysOnTop() {
+        return Boolean.parseBoolean(System.getProperty(DEVTOOLS_ALWAYS_ON_TOP_PROPERTY, "false"));
+    }
+
+    private void raiseDevToolsWindow() {
+        if (frame == null || !frame.isShowing()) return;
         frame.toFront();
+        frame.requestFocus();
+        canvas.requestFocusInWindow();
     }
 
     private final class Canvas extends JPanel {

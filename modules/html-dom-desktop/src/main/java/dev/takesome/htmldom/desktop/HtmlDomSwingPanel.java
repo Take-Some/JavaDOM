@@ -26,6 +26,7 @@ import dev.takesome.htmldom.markup.UiMarkupParser;
 import dev.takesome.htmldom.scripting.lua.HtmlDomLuaRuntime;
 
 import javax.swing.JPanel;
+import javax.swing.SwingUtilities;
 import javax.swing.Timer;
 import java.awt.Stroke;
 import java.awt.FontMetrics;
@@ -42,10 +43,12 @@ import java.awt.RenderingHints;
 import java.awt.Shape;
 import java.awt.geom.RoundRectangle2D;
 import java.awt.Paint;
+import java.awt.Window;
 import java.util.List;
 
 /** Desktop Swing renderer for HtmlDom markup + CSS. No browser and no HTTP server. */
 public final class HtmlDomSwingPanel extends JPanel implements HtmlDomInputRouter.Host {
+    private static final String DEVTOOLS_PUSH_INSPECTED_BEHIND_PROPERTY = "htmldom.devtools.pushInspectedBehind";
     private static final HtmlDomLogger LOG = HtmlDomLog.logger(HtmlDomSwingPanel.class);
     private final UiDomDocument dom;
     private final UiStylesheet stylesheet;
@@ -263,8 +266,12 @@ public final class HtmlDomSwingPanel extends JPanel implements HtmlDomInputRoute
     }
 
     @Override public void openDevTools() {
+        Window inspectedWindow = SwingUtilities.getWindowAncestor(this);
         if (devToolsWindow == null) devToolsWindow = new HtmlDomDevToolsWindow(this);
         devToolsWindow.open();
+        if (Boolean.getBoolean(DEVTOOLS_PUSH_INSPECTED_BEHIND_PROPERTY) && inspectedWindow != null) {
+            SwingUtilities.invokeLater(inspectedWindow::toBack);
+        }
     }
 
     @Override public ScrollDrag activeScrollDrag() {
