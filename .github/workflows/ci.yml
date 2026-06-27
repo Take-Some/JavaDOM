@@ -29,7 +29,7 @@ jobs:
         run: .\gradlew.bat clean test packageRelease --console=plain --no-daemon
 
       - name: Upload bundled showcase jar
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: html-dom-ui-bundled
           path: modules/html-dom-desktop/build/libs/html-dom-ui-*-bundled.jar
