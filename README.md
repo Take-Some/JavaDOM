@@ -11,7 +11,7 @@ This is a desktop stack, not browser/WebView: retained DOM, HTML-like markup, CS
 
 ## Release identity
 
-- Current version: `1.0.2`
+- Current version: `1.0.12`
 - Release name: `CSS Length Tolerance Hotfix`
 - Authors: `Take Some()`
 - Primary package group: `dev.takesome`
@@ -32,7 +32,7 @@ This is a desktop stack, not browser/WebView: retained DOM, HTML-like markup, CS
 - [DevTools and runtime editing](docs/devtools.md)
 - [Lua scripting ABI](docs/lua-scripting.md)
 - [Packages and release process](docs/packages-and-release.md)
-- [1.0.2 CSS Length Tolerance Hotfix notes](docs/releases/1.0.2-css-length-tolerance-hotfix.md)
+- [1.0.12 CSS Length Tolerance Hotfix notes](docs/releases/1.0.12-css-length-tolerance-hotfix.md)
 - [1.0.1 Documentary Release notes](docs/releases/1.0.1-documentary-release.md)
 - [Authors](AUTHORS.md)
 
@@ -101,7 +101,7 @@ gradlew.bat bundledHtmlUiJar --console=plain --no-daemon
 Run it:
 
 ```bat
-java -jar modules\html-dom-desktop\build\libs\html-dom-ui-1.0.2-bundled.jar
+java -jar modules\html-dom-desktop\build\libs\html-dom-ui-1.0.12-bundled.jar
 ```
 
 ## Paint tree / scroll containers
@@ -122,7 +122,7 @@ DevTools snapshots include layout nodes, paint nodes and scroll container nodes 
 
 ## Maven package
 
-Artifacts are published as GitHub Packages when a release tag such as `v1.0.2` is pushed.
+Artifacts are published as GitHub Packages when a release tag such as `v1.0.12` is pushed.
 
 Gradle repository setup:
 
@@ -143,15 +143,15 @@ Primary dependency examples:
 ```gradle
 dependencies {
     // All-in-one executable desktop runtime package:
-    implementation 'dev.takesome:html-dom-aio:1.0.2'
+    implementation 'dev.takesome:html-dom-aio:1.0.12'
 
     // Split module packages:
-    implementation 'dev.takesome:html-dom-core:1.0.2'
-    implementation 'dev.takesome:html-dom-desktop:1.0.2'
-    implementation 'dev.takesome:html-dom-fonts:1.0.2'
-    implementation 'dev.takesome:html-dom-icons-fontawesome:1.0.2'
-    implementation 'dev.takesome:html-dom-scripting-lua:1.0.2'
-    implementation 'dev.takesome:html-dom-devtools:1.0.2'
+    implementation 'dev.takesome:html-dom-core:1.0.12'
+    implementation 'dev.takesome:html-dom-desktop:1.0.12'
+    implementation 'dev.takesome:html-dom-fonts:1.0.12'
+    implementation 'dev.takesome:html-dom-icons-fontawesome:1.0.12'
+    implementation 'dev.takesome:html-dom-scripting-lua:1.0.12'
+    implementation 'dev.takesome:html-dom-devtools:1.0.12'
 }
 ```
 
@@ -159,7 +159,7 @@ Build the AIO jar locally:
 
 ```bat
 gradlew.bat :html-dom-desktop:aioJar --console=plain --no-daemon
-java -jar modules\html-dom-desktop\build\libs\html-dom-aio-1.0.2.jar
+java -jar modules\html-dom-desktop\build\libs\html-dom-aio-1.0.12.jar
 ```
 
 Local verification:
@@ -183,13 +183,13 @@ GitHub Actions are configured in:
 ```
 
 - `CI` runs on `main` and pull requests.
-- `Release` runs on version tags such as `v1.0.2`.
-- Maven artifacts are published to GitHub Packages under `dev.takesome:*:1.0.2`, including `dev.takesome:html-dom-aio:1.0.2`.
+- `Release` runs on version tags such as `v1.0.12`.
+- Maven artifacts are published to GitHub Packages under `dev.takesome:*:1.0.12`, including `dev.takesome:html-dom-aio:1.0.12`.
 - The bundled desktop showcase jar is attached to the GitHub release.
 
 Create a release locally:
 
 ```bat
-git tag -a v1.0.2 -m "HtmlDom 1.0.2 — CSS Length Tolerance Hotfix"
-git push origin main v1.0.2
+git tag -a v1.0.12 -m "HtmlDom 1.0.12 — CSS Length Tolerance Hotfix"
+git push origin main v1.0.12
 ```
