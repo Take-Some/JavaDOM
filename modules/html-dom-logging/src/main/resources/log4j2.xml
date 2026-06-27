@@ -1,34 +1,35 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <Configuration status="WARN">
     <Properties>
-        <Property name="LOG_PATTERN">[%d{HH:mm:ss.SSS}] %-5level [%c{1}] [%t]: %msg%n</Property>
-        <Property name="CONSOLE_PATTERN">%style{[%d{HH:mm:ss.SSS}]}{black,bold} %highlight{%-5level}{FATAL=red blink, ERROR=red, WARN=yellow, INFO=green, DEBUG=cyan, TRACE=blue} [%style{%c{1}}{cyan}] [%t]: %msg%n</Property>
-        <Property name="LOG_FILE">${sys:helix.logFile:-logs/helix.log}</Property>
+        <Property name="HtmlDomLogLevel">${sys:htmldom.log.level:-info}</Property>
+        <Property name="ExternalLogLevel">${sys:htmldom.external.log.level:-warn}</Property>
+        <Property name="ConsolePattern">%style{[%d{HH:mm:ss.SSS}]}{bright black} %highlight{[%-5level]}{FATAL=bright red, ERROR=red, WARN=yellow, INFO=green, DEBUG=cyan, TRACE=blue} %style{[%t]}{blue} %style{[%logger{1}]}{magenta} %msg%n%throwable</Property>
+        <Property name="FilePattern">%d{yyyy-MM-dd HH:mm:ss.SSS} [HtmlDom] [%t] %-5level %logger{96} - %msg%n%throwable</Property>
+        <Property name="LogFile">${sys:htmldom.log.file:-logs/htmldom.log}</Property>
     </Properties>
 
     <Appenders>
         <Console name="Console" target="SYSTEM_OUT">
-            <PatternLayout
-                disableAnsi="false"
-                noConsoleNoAnsi="false"
-                pattern="${CONSOLE_PATTERN}"/>
+            <PatternLayout pattern="${ConsolePattern}" disableAnsi="${sys:htmldom.log.noColor:-false}" noConsoleNoAnsi="false"/>
         </Console>
 
-        <File name="File" fileName="${LOG_FILE}" append="false" createOnDemand="true">
-            <PatternLayout pattern="${LOG_PATTERN}"/>
+        <File name="File" fileName="${LogFile}" append="false" createOnDemand="true">
+            <PatternLayout pattern="${FilePattern}"/>
         </File>
     </Appenders>
 
     <Loggers>
-        <Logger name="dev.takesome.helix" level="trace" additivity="false">
+        <Logger name="dev.takesome.htmldom" level="${HtmlDomLogLevel}" additivity="false">
             <AppenderRef ref="Console"/>
             <AppenderRef ref="File"/>
         </Logger>
 
-        <Logger name="dev.takesome.helix.concurrent" level="debug" additivity="false">
+        <Logger name="dev.takesome.helix" level="${HtmlDomLogLevel}" additivity="false">
             <AppenderRef ref="Console"/>
             <AppenderRef ref="File"/>
         </Logger>
+
+        <Logger name="org.apache.logging" level="${ExternalLogLevel}"/>
 
         <Root level="warn">
             <AppenderRef ref="Console"/>

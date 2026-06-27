@@ -2,6 +2,18 @@ plugins {
     id 'application'
 }
 
+def htmlDomAnsiJvmArgs = [
+        '-Dlog4j2.skipJansi=false',
+        '-Dlog4j.skipJansi=false',
+        '-Dlog4j2.enableJansi=true',
+        '-Dlog4j2.forceAnsi=true',
+        '-Djansi.mode=force',
+        '-Djansi.out.mode=force',
+        '-Djansi.err.mode=force',
+        '-Djansi.passthrough=true',
+        '-Djansi.strip=false'
+]
+
 dependencies {
     api project(':html-dom-core')
     api project(':html-dom-fonts')
@@ -12,6 +24,17 @@ dependencies {
 
 application {
     mainClass = 'dev.takesome.htmldom.bundled.BundledHtmlUi'
+    applicationDefaultJvmArgs = htmlDomAnsiJvmArgs
+}
+
+tasks.named('run', JavaExec) {
+    jvmArgs htmlDomAnsiJvmArgs
+    ['htmldom.log.level', 'htmldom.external.log.level', 'htmldom.log.noColor'].each { propertyName ->
+        def propertyValue = System.getProperty(propertyName)
+        if (propertyValue != null && !propertyValue.isBlank()) {
+            jvmArgs "-D${propertyName}=${propertyValue}"
+        }
+    }
 }
 
 tasks.named('jar') {

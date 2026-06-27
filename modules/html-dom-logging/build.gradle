@@ -1,3 +1,5 @@
 dependencies {
     api "org.fusesource.jansi:jansi:${rootProject.ext.jansiVersion}"
+    implementation "org.apache.logging.log4j:log4j-api:${rootProject.ext.log4jVersion}"
+    runtimeOnly "org.apache.logging.log4j:log4j-core:${rootProject.ext.log4jVersion}"
 }

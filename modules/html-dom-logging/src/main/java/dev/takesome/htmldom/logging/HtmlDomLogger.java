@@ -1,153 +1,78 @@
 package dev.takesome.htmldom.logging;
 
-import org.fusesource.jansi.Ansi;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
-import java.time.LocalTime;
-import java.time.format.DateTimeFormatter;
-import java.util.Locale;
-
-/** Small dependency-light logger for HtmlDom modules. */
+/** Log4j2 adapter used by HtmlDom modules. */
 public final class HtmlDomLogger {
-    private static final DateTimeFormatter TIME = DateTimeFormatter.ofPattern("HH:mm:ss.SSS");
-    private static final String LOG_LEVEL_PROPERTY = "htmldom.log.level";
-    private static final String LEGACY_DEBUG_PROPERTY = "htmldom.debug";
     private final String name;
+    private final Logger logger;
 
     HtmlDomLogger(String name) {
         this.name = name == null || name.isBlank() ? "dev.takesome.htmldom" : name;
+        this.logger = LogManager.getLogger(this.name);
     }
 
     public boolean traceEnabled() {
-        return enabled(Level.TRACE);
+        return logger.isTraceEnabled();
     }
 
     public boolean debugEnabled() {
-        return enabled(Level.DEBUG);
+        return logger.isDebugEnabled();
     }
 
     public void trace(String message, Object... args) {
-        log(Level.TRACE, message, args);
+        if (logger.isTraceEnabled()) {
+            logger.trace(safe(message), args);
+        }
     }
 
     public void debug(String message, Object... args) {
-        log(Level.DEBUG, message, args);
+        if (logger.isDebugEnabled()) {
+            logger.debug(safe(message), args);
+        }
     }
 
     public void info(String message, Object... args) {
-        log(Level.INFO, message, args);
+        if (logger.isInfoEnabled()) {
+            logger.info(safe(message), args);
+        }
     }
 
     public void warn(String message, Object... args) {
-        log(Level.WARN, message, args);
+        if (logger.isWarnEnabled()) {
+            logger.warn(safe(message), args);
+        }
     }
 
     public void error(String message, Object... args) {
-        log(Level.ERROR, message, args);
+        if (logger.isErrorEnabled()) {
+            logger.error(safe(message), args);
+        }
     }
 
     public void error(String message, Throwable error, Object... args) {
-        log(Level.ERROR, message, args);
-        if (error != null) {
-            printThrowable(error);
-        }
-    }
-
-    private void log(Level level, String message, Object... args) {
-        if (!enabled(level)) return;
-        String line = "[" + TIME.format(LocalTime.now()) + "] [" + level.label + "] [" + Thread.currentThread().getName() + "] [" + shortName() + "] " + format(message, args);
-        if (noColor()) {
-            System.err.println(line);
+        if (!logger.isErrorEnabled()) {
             return;
         }
-        try {
-            System.err.println(Ansi.ansi().fg(level.color).a(line).reset());
-        } catch (Throwable ignored) {
-            System.err.println(line);
-        }
-    }
-
-    private void printThrowable(Throwable error) {
-        if (noColor()) {
-            error.printStackTrace(System.err);
+        if (error == null) {
+            logger.error(safe(message), args);
             return;
         }
-        try {
-            System.err.println(Ansi.ansi().fg(Ansi.Color.RED).a(error.getClass().getName()).a(": ").a(error.getMessage()).reset());
-            for (StackTraceElement frame : error.getStackTrace()) {
-                System.err.println(Ansi.ansi().fg(Ansi.Color.RED).a("    at ").a(frame.toString()).reset());
-            }
-            Throwable cause = error.getCause();
-            if (cause != null && cause != error) {
-                System.err.println(Ansi.ansi().fg(Ansi.Color.RED).a("Caused by: ").a(cause.getClass().getName()).a(": ").a(cause.getMessage()).reset());
-                for (StackTraceElement frame : cause.getStackTrace()) {
-                    System.err.println(Ansi.ansi().fg(Ansi.Color.RED).a("    at ").a(frame.toString()).reset());
-                }
-            }
-        } catch (Throwable ignored) {
-            error.printStackTrace(System.err);
+        logger.error(safe(message), appendThrowable(args, error));
+    }
+
+    private static Object[] appendThrowable(Object[] args, Throwable error) {
+        if (args == null || args.length == 0) {
+            return new Object[]{error};
         }
+        Object[] copy = new Object[args.length + 1];
+        System.arraycopy(args, 0, copy, 0, args.length);
+        copy[copy.length - 1] = error;
+        return copy;
     }
 
-    private boolean enabled(Level level) {
-        return level.priority >= threshold().priority;
-    }
-
-    private Level threshold() {
-        String configured = System.getProperty(LOG_LEVEL_PROPERTY, "");
-        if (configured.isBlank() && Boolean.getBoolean(LEGACY_DEBUG_PROPERTY)) return Level.DEBUG;
-        return Level.from(configured, Level.INFO);
-    }
-
-    private boolean noColor() {
-        return Boolean.getBoolean("htmldom.log.noColor") || Boolean.getBoolean("htmldom.noColor");
-    }
-
-    private String shortName() {
-        int dot = name.lastIndexOf('.');
-        return dot < 0 ? name : name.substring(dot + 1);
-    }
-
-    private static String format(String message, Object... args) {
-        String template = message == null ? "" : message;
-        if (args == null || args.length == 0) return template;
-        StringBuilder out = new StringBuilder(template.length() + args.length * 12);
-        int argIndex = 0;
-        for (int i = 0; i < template.length(); i++) {
-            if (i + 1 < template.length() && template.charAt(i) == '{' && template.charAt(i + 1) == '}' && argIndex < args.length) {
-                out.append(String.valueOf(args[argIndex++]));
-                i++;
-            } else {
-                out.append(template.charAt(i));
-            }
-        }
-        while (argIndex < args.length) out.append(' ').append(String.valueOf(args[argIndex++]));
-        return out.toString();
-    }
-
-    private enum Level {
-        TRACE("TRACE", Ansi.Color.MAGENTA, 10),
-        DEBUG("DEBUG", Ansi.Color.CYAN, 20),
-        INFO("INFO", Ansi.Color.GREEN, 30),
-        WARN("WARN", Ansi.Color.YELLOW, 40),
-        ERROR("ERROR", Ansi.Color.RED, 50);
-
-        private final String label;
-        private final Ansi.Color color;
-        private final int priority;
-
-        Level(String label, Ansi.Color color, int priority) {
-            this.label = label.toUpperCase(Locale.ROOT);
-            this.color = color;
-            this.priority = priority;
-        }
-
-        private static Level from(String value, Level fallback) {
-            if (value == null || value.isBlank()) return fallback;
-            String normalized = value.trim().toUpperCase(Locale.ROOT);
-            for (Level level : values()) {
-                if (level.label.equals(normalized)) return level;
-            }
-            return fallback;
-        }
+    private static String safe(String message) {
+        return message == null ? "" : message;
     }
 }
