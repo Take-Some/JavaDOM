@@ -11,6 +11,7 @@ import dev.takesome.htmldom.dom.UiDomTraversal;
 import dev.takesome.htmldom.markup.UiMarkupParser;
 
 import javax.swing.JFrame;
+import javax.swing.WindowConstants;
 import javax.swing.JPanel;
 import javax.swing.SwingUtilities;
 import java.awt.BasicStroke;
@@ -118,12 +119,26 @@ public final class HtmlDomDevToolsWindow {
         else SwingUtilities.invokeLater(canvas::repaint);
     }
 
+    public void close() {
+        if (SwingUtilities.isEventDispatchThread()) closeOnEdt();
+        else SwingUtilities.invokeLater(this::closeOnEdt);
+    }
+
+    private void closeOnEdt() {
+        JFrame current = frame;
+        frame = null;
+        if (current == null) return;
+        current.setAlwaysOnTop(false);
+        current.setVisible(false);
+        current.dispose();
+    }
+
     private void openOnEdt() {
         if (frame == null || !frame.isDisplayable()) {
             frame = new JFrame("HtmlDom DevTools — Elements");
             frame.setName("HtmlDom DevTools");
             frame.setAutoRequestFocus(true);
-            frame.setDefaultCloseOperation(JFrame.HIDE_ON_CLOSE);
+            frame.setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
             frame.setContentPane(canvas);
             frame.setSize(1220, 780);
             frame.setMinimumSize(new Dimension(900, 560));

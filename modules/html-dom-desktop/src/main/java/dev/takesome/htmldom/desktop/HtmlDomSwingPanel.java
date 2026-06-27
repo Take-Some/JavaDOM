@@ -163,6 +163,20 @@ public final class HtmlDomSwingPanel extends JPanel implements HtmlDomInputRoute
         repaint();
     }
 
+    public void closeDevTools() {
+        HtmlDomDevToolsWindow window = devToolsWindow;
+        if (window != null) {
+            window.close();
+            devToolsWindow = null;
+        }
+        setDevToolsHighlightedNodeId(0);
+    }
+
+    @Override public void removeNotify() {
+        closeDevTools();
+        super.removeNotify();
+    }
+
     private static String optionalResource(String path) {
         try (java.io.InputStream stream = HtmlDomSwingPanel.class.getClassLoader().getResourceAsStream(path)) {
             if (stream == null) {
