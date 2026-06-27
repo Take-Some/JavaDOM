@@ -1,10 +1,10 @@
-# HtmlDom 1.0.10 — Configurable DevTools Policies
+# HtmlDom 1.0.10 — Configurable DevTools and Layout Architecture
 
 **Authors:** Take Some()
 
-HtmlDom 1.0.10 introduces instance-level desktop configuration for DevTools behavior. DevTools policy is now owned by HtmlDom configuration instead of ad-hoc system properties or host-specific window hacks.
+HtmlDom 1.0.10 is an architecture release for DevTools policy configuration and the CSS/layout rendering pipeline.
 
-## Release scope
+## DevTools architecture
 
 - Added `HtmlDomConfig` as the base desktop runtime configuration object.
 - Added enum-driven DevTools policies:
@@ -16,6 +16,13 @@ HtmlDom 1.0.10 introduces instance-level desktop configuration for DevTools beha
 - DevTools window creation is now config-driven: standalone frame, ownerless dialog, or owned dialog.
 - DevTools z-order is now config-driven: passive, same-level, or always-on-top.
 - DevTools lifecycle is tied to the inspected host by default through `CLOSE_WITH_HOST`.
+
+## CSS / layout architecture
+
+- Split large layout responsibilities out of `UiCssLayoutEngine` into dedicated engines.
+- Added box sizing, flex layout, inline formatting, and scroll extent helpers.
+- Added named color and border style helpers for desktop painting.
+- Reduced direct layout/paint coupling and prepared the renderer for more complete HTML/CSS behavior.
 
 ## Package coordinates
 
@@ -35,12 +42,12 @@ dependencies {
 ## Local verification
 
 ```bat
-gradlew.bat clean test packageRelease --console=plain --no-daemon
+gradlew.bat :html-dom-desktop:compileJava :html-dom-desktop:aioJar --console=plain
 ```
 
 ## Release trigger
 
 ```bat
-git tag -a v1.0.10 -m "HtmlDom 1.0.10 — Configurable DevTools Policies"
+git tag -a v1.0.10 -m "HtmlDom 1.0.10 — Configurable DevTools and Layout Architecture"
 git push origin main v1.0.10
 ```
