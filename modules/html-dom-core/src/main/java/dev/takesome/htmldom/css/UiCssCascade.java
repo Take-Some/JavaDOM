@@ -57,7 +57,7 @@ public final class UiCssCascade {
         this.properties = Objects.requireNonNull(properties, "properties");
     }
 
-    public void apply(UiDomDocument document, UiStylesheet stylesheet) {
+    public UiCssStyleImpact apply(UiDomDocument document, UiStylesheet stylesheet) {
         Objects.requireNonNull(document, "document");
         Objects.requireNonNull(stylesheet, "stylesheet");
         UiDomElement root = document.root();
@@ -66,9 +66,9 @@ public final class UiCssCascade {
         int elementCount = 0;
         int matchedRules = 0;
         int appliedDeclarations = 0;
+        UiCssStyleImpact impact = UiCssStyleImpact.NONE;
         for (UiDomElement element : UiDomTraversal.depthFirstElements(root)) {
             elementCount++;
-            element.clearComputedStyle();
             Map<String, AppliedValue> values = new LinkedHashMap<>();
             Map<String, Map<String, AppliedValue>> pseudoValues = new LinkedHashMap<>();
             applyUserAgentRules(element, values, pseudoValues);
@@ -89,37 +89,42 @@ public final class UiCssCascade {
             applyInline(element, values);
             applyInheritedValues(element, values);
             LinkedHashMap<String, String> resolved = new LinkedHashMap<>();
-            values.forEach((property, value) -> {
-                String resolvedValue = resolveVariables(value.value(), variables);
-                resolved.put(property, resolvedValue);
-                element.setComputedStyle(property, resolvedValue);
+            values.forEach((property, value) -> resolved.put(property, resolveVariables(value.value(), variables)));
+            LinkedHashMap<String, Map<String, String>> resolvedPseudo = new LinkedHashMap<>();
+            pseudoValues.forEach((pseudoElement, style) -> {
+                LinkedHashMap<String, String> target = new LinkedHashMap<>();
+                style.forEach((property, value) -> target.put(property, resolveVariables(value.value(), variables)));
+                resolvedPseudo.put(pseudoElement, target);
             });
+            impact = impact.merge(element.replaceComputedStyle(resolved, resolvedPseudo));
             traceComputedStyleIfRequested(element, resolved, values);
-            pseudoValues.forEach((pseudoElement, style) -> style.forEach((property, value) -> element.setPseudoComputedStyle(pseudoElement, property, resolveVariables(value.value(), variables))));
         }
         if (Boolean.getBoolean(TRACE_CASCADE_PROPERTY)) {
             LOG.info(
-                    "UI CSS cascade applied root='{}' elements={} authorRules={} matchedRules={} declarations={} variables={} elapsedMs={}",
+                    "UI CSS cascade applied root='{}' elements={} authorRules={} matchedRules={} declarations={} variables={} impact={} elapsedMs={}",
                     elementDescription(root),
                     elementCount,
                     stylesheet.rules().size(),
                     matchedRules,
                     appliedDeclarations,
                     variables.keySet(),
+                    impact,
                     Math.max(0L, (System.nanoTime() - started) / 1_000_000L)
             );
         } else if (LOG.debugEnabled()) {
             LOG.debug(
-                    "UI CSS cascade applied root='{}' elements={} authorRules={} matchedRules={} declarations={} variables={} elapsedMs={}",
+                    "UI CSS cascade applied root='{}' elements={} authorRules={} matchedRules={} declarations={} variables={} impact={} elapsedMs={}",
                     elementDescription(root),
                     elementCount,
                     stylesheet.rules().size(),
                     matchedRules,
                     appliedDeclarations,
                     variables.keySet(),
+                    impact,
                     Math.max(0L, (System.nanoTime() - started) / 1_000_000L)
             );
         }
+        return impact;
     }
 
     private void applyUserAgentRules(
@@ -146,7 +151,7 @@ public final class UiCssCascade {
         if (parent == null) return;
         UiCssSpecificity inheritedSpecificity = new UiCssSpecificity(-1, -1, -1);
         for (String property : INHERITED_PROPERTIES) {
-            String parentValue = parent.style(property, "");
+            String parentValue = parent.baseComputedStyle().getOrDefault(property, "");
             AppliedValue current = values.get(property);
             if (current != null && "inherit".equalsIgnoreCase(current.value())) {
                 values.put(property, new AppliedValue(parentValue, current.specificity(), current.order(), current.source() + ":inherit"));

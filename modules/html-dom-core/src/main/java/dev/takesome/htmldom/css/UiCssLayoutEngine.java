@@ -696,10 +696,10 @@ public final class UiCssLayoutEngine {
     }
 
     private void writeBox(UiDomElement element, UiCssBox box) {
-        element.setComputedStyle(layoutX.name(), px(box.x()));
-        element.setComputedStyle(layoutY.name(), px(box.y()));
-        element.setComputedStyle(width.name(), px(box.width()));
-        element.setComputedStyle(height.name(), px(box.height()));
+        element.setInternalComputedStyle(layoutX.name(), px(box.x()));
+        element.setInternalComputedStyle(layoutY.name(), px(box.y()));
+        element.setInternalComputedStyle(width.name(), px(box.width()));
+        element.setInternalComputedStyle(height.name(), px(box.height()));
     }
 
     private String px(float value) {

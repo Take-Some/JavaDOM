@@ -13,8 +13,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 public final class UiDomDocument {
     private final AtomicInteger nextNodeId = new AtomicInteger(1);
     private final ArrayDeque<UiDomMutation> mutations = new ArrayDeque<>();
-    private UiDomElement root;
-    private long version;
+    private volatile UiDomElement root;
+    private volatile long version;
 
     public static UiDomDocument parse(String markupSource) {
         return new UiDomParser().parse(markupSource);
@@ -97,11 +97,11 @@ public final class UiDomDocument {
         return UiDomTraversal.depthFirstElements(root).stream().filter(parsed::matches).toList();
     }
 
-    public List<UiDomMutation> mutations() {
+    public synchronized List<UiDomMutation> mutations() {
         return Collections.unmodifiableList(new ArrayList<>(mutations));
     }
 
-    public List<UiDomMutation> drainMutations() {
+    public synchronized List<UiDomMutation> drainMutations() {
         ArrayList<UiDomMutation> out = new ArrayList<>(mutations);
         mutations.clear();
         return out;
@@ -117,10 +117,10 @@ public final class UiDomDocument {
         return Optional.empty();
     }
 
-    long nextVersion(UiDomMutationType type, UiDomNode node, String key, String oldValue, String newValue) {
+    synchronized long nextVersion(UiDomMutationType type, UiDomNode node, String key, String oldValue, String newValue) {
         version++;
         mutations.addLast(new UiDomMutation(version, type, node.nodeId(), node.nodeName(), key, oldValue, newValue));
-        while (mutations.size() > 512) mutations.removeFirst();
+        while (mutations.size() > 512 && !mutations.isEmpty()) mutations.removeFirst();
         return version;
     }
 }

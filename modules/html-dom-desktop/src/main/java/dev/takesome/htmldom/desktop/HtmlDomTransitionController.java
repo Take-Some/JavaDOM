@@ -1,8 +1,11 @@
 package dev.takesome.htmldom.desktop;
 
+import dev.takesome.htmldom.css.UiCssStyleImpact;
 import dev.takesome.htmldom.dom.UiDomDocument;
 import dev.takesome.htmldom.dom.UiDomElement;
 import dev.takesome.htmldom.dom.UiDomTraversal;
+import dev.takesome.htmldom.logging.HtmlDomLog;
+import dev.takesome.htmldom.logging.HtmlDomLogger;
 
 import java.util.HashMap;
 import java.util.List;
@@ -11,6 +14,7 @@ import java.util.Map;
 
 /** Minimal CSS transition runtime for paint-only properties. */
 public final class HtmlDomTransitionController {
+    private static final HtmlDomLogger LOG = HtmlDomLog.logger(HtmlDomTransitionController.class);
     private static final List<String> SUPPORTED = List.of("transform", "opacity", "color", "border-color", "background-color");
     private final Map<Integer, ElementState> states = new HashMap<>();
     private boolean active;
@@ -27,47 +31,59 @@ public final class HtmlDomTransitionController {
         return out;
     }
 
-    public boolean apply(UiDomDocument document) {
+    public TickResult apply(UiDomDocument document) {
         finishedEvents.clear();
         active = false;
-        if (document == null) return false;
+        if (document == null) return new TickResult(false, UiCssStyleImpact.NONE);
         long now = System.currentTimeMillis();
-        for (UiDomElement element : UiDomTraversal.depthFirstElements(document.documentElement())) apply(element, now);
-        return active;
+        UiCssStyleImpact impact = UiCssStyleImpact.NONE;
+        for (UiDomElement element : UiDomTraversal.depthFirstElements(document.documentElement())) {
+            impact = impact.merge(apply(element, now));
+        }
+        return new TickResult(active, impact);
     }
 
-    private void apply(UiDomElement element, long now) {
+    private UiCssStyleImpact apply(UiDomElement element, long now) {
+        UiCssStyleImpact impact = UiCssStyleImpact.NONE;
         ElementState state = states.computeIfAbsent(element.nodeId(), ignored -> new ElementState());
         if (!state.initialized) {
             for (String property : SUPPORTED) {
                 String target = targetValue(element, property);
                 state.targets.put(property, target);
                 state.effective.put(property, target);
+                element.removeAnimatedComputedStyle(property);
             }
             state.initialized = true;
-            return;
+            return UiCssStyleImpact.NONE;
         }
         for (String property : SUPPORTED) {
             String target = targetValue(element, property);
             String previousTarget = state.targets.getOrDefault(property, defaultValue(property));
             if (!same(previousTarget, target)) {
                 TransitionSpec spec = transitionSpec(element, property);
+                UiCssStyleImpact propertyImpact = UiCssStyleImpact.of(property);
                 String start = state.effective.getOrDefault(property, previousTarget);
                 state.targets.put(property, target);
+                if (LOG.debugEnabled()) {
+                    LOG.debug("HtmlDom transition property='{}' impact={} element='{}' durationMs={} delayMs={}", property, propertyImpact, elementDescription(element), spec.durationMs, spec.delayMs);
+                }
                 if (spec.durationMs > 0L) {
                     state.animations.put(property, new Animation(property, start, target, now + spec.delayMs, spec.durationMs, spec.timing));
+                    impact = impact.merge(propertyImpact);
                 } else {
                     state.animations.remove(property);
                     state.effective.put(property, target);
+                    if (element.removeAnimatedComputedStyle(property)) impact = impact.merge(propertyImpact);
                 }
             }
             Animation animation = state.animations.get(property);
             if (animation != null) {
+                UiCssStyleImpact propertyImpact = UiCssStyleImpact.of(property);
                 String value = animation.value(now);
-                element.setComputedStyle(property, value);
+                if (element.setAnimatedComputedStyle(property, value)) impact = impact.merge(propertyImpact);
                 state.effective.put(property, value);
                 if (animation.done(now)) {
-                    element.setComputedStyle(property, animation.end);
+                    if (element.removeAnimatedComputedStyle(property)) impact = impact.merge(propertyImpact);
                     state.effective.put(property, animation.end);
                     state.animations.remove(property);
                     finishedEvents.add(new TransitionEndEvent(element, property, animation.durationMs));
@@ -78,10 +94,11 @@ public final class HtmlDomTransitionController {
                 state.effective.put(property, target);
             }
         }
+        return impact;
     }
 
     private String targetValue(UiDomElement element, String property) {
-        String raw = element.style(property, "").trim();
+        String raw = element.baseComputedStyle().getOrDefault(property, "").trim();
         if (raw.isBlank()) return defaultValue(property);
         return raw;
     }
@@ -194,7 +211,17 @@ public final class HtmlDomTransitionController {
         return v.equals("linear") || v.equals("ease") || v.equals("ease-in") || v.equals("ease-out") || v.equals("ease-in-out") || v.startsWith("cubic-bezier(");
     }
 
+    public record TickResult(boolean active, UiCssStyleImpact impact) { }
+
     public record TransitionEndEvent(UiDomElement element, String propertyName, long elapsedMs) { }
+
+    private String elementDescription(UiDomElement element) {
+        if (element == null) return "";
+        StringBuilder out = new StringBuilder(element.tagName());
+        if (!element.id().isBlank()) out.append('#').append(element.id());
+        for (String className : element.classList().values()) out.append('.').append(className);
+        return out.toString();
+    }
 
     private static final class ElementState {
         boolean initialized;

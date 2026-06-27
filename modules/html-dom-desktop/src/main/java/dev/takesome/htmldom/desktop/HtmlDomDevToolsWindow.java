@@ -37,6 +37,8 @@ import java.awt.event.KeyEvent;
 import java.awt.event.KeyAdapter;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
+import java.awt.geom.Ellipse2D;
+import java.awt.image.BufferedImage;
 import java.nio.file.Paths;
 import java.nio.file.Path;
 import java.nio.file.Files;
@@ -77,6 +79,14 @@ public final class HtmlDomDevToolsWindow {
     private static final String I_UNDO = "\uf0e2";
     private static final String I_REDO = "\uf01e";
     private static final String I_SAVE = "\uf0c7";
+    private static final String I_TIMES = "\uf00d";
+    private static final String I_MINUS = "\uf068";
+    private static final String I_DROPPER = "\uf1fb";
+    private static final int[] COLOR_PICKER_PRESETS = {
+            0xEF4444, 0xE91E63, 0x8B5CF6, 0x6366F1, 0x3B82F6, 0x0EA5E9, 0x06B6D4,
+            0x10B981, 0x22C55E, 0xA3E635, 0xFACC15, 0xFDE047, 0xF97316, 0xF4511E,
+            0x795548, 0x94A3B8, 0x64748B
+    };
     private static final int HEADER = 44;
     private static final int LEFT_W = 540;
     private static final int ROW_H = 23;
@@ -99,6 +109,9 @@ public final class HtmlDomDevToolsWindow {
     private String saveStatus = "";
     private String editingComputedProperty = "";
     private String editingComputedValue = "";
+    private String editingComputedOriginalValue = "";
+    private String editingComputedLastAppliedValue = "";
+    private boolean editingComputedLiveApplied;
     private String keywordPopupProperty = "";
     private List<String> keywordPopupOptions = List.of();
     private int keywordPopupAnchorX;
@@ -106,6 +119,11 @@ public final class HtmlDomDevToolsWindow {
     private String colorPickerProperty = "";
     private String colorPickerOriginalValue = "";
     private Color colorPickerColor = Color.WHITE;
+    private float colorPickerHue;
+    private float colorPickerSaturation;
+    private float colorPickerBrightness = 1f;
+    private String colorPickerEditingChannel = "";
+    private String colorPickerEditingValue = "";
     private int colorPickerAnchorX;
     private int colorPickerAnchorY;
     private boolean colorPickerUndoCaptured;
@@ -151,11 +169,13 @@ public final class HtmlDomDevToolsWindow {
     }
 
     private Window createToolWindow() {
-        return switch (config.devToolsWindowType()) {
+        JDialog dialog = switch (config.devToolsWindowType()) {
             case STANDALONE_FRAME -> new JDialog((java.awt.Frame) null, "HtmlDom DevTools — Elements", false);
             case OWNERLESS_DIALOG -> new JDialog((java.awt.Frame) null, "HtmlDom DevTools — Elements", false);
             case OWNED_DIALOG -> createOwnedDialog();
         };
+        dialog.setUndecorated(true);
+        return dialog;
     }
 
     private JDialog createOwnedDialog() {
@@ -225,6 +245,7 @@ public final class HtmlDomDevToolsWindow {
         private final ArrayList<ToggleHit> toggleHits = new ArrayList<>();
         private final ArrayList<TabHit> tabHits = new ArrayList<>();
         private final ArrayList<ToolButtonHit> toolButtonHits = new ArrayList<>();
+        private final ArrayList<WindowButtonHit> windowButtonHits = new ArrayList<>();
         private final ArrayList<ComputedHit> computedHits = new ArrayList<>();
         private final ArrayList<KeywordOptionHit> keywordOptionHits = new ArrayList<>();
         private final ArrayList<ColorPickerHit> colorPickerHits = new ArrayList<>();
@@ -240,6 +261,9 @@ public final class HtmlDomDevToolsWindow {
         private int contextMenuX;
         private int contextMenuY;
         private int contextNodeId;
+        private boolean draggingWindow;
+        private Point windowDragStartScreen = new Point();
+        private Point windowDragStartLocation = new Point();
 
         Canvas() {
             setBackground(BG);
@@ -251,8 +275,14 @@ public final class HtmlDomDevToolsWindow {
                 @Override public void mouseDragged(MouseEvent e) { handleDrag(e); }
                 @Override public void mouseExited(MouseEvent e) { clearHover(); }
                 @Override public void mouseClicked(MouseEvent e) { handleClick(e); }
-                @Override public void mousePressed(MouseEvent e) { if (popup(e)) openContextMenu(e); else beginHtmlSelection(e); }
-                @Override public void mouseReleased(MouseEvent e) { if (popup(e)) openContextMenu(e); else htmlSelecting = false; }
+                @Override public void mousePressed(MouseEvent e) {
+                    if (popup(e)) openContextMenu(e);
+                    else if (!beginWindowDrag(e)) beginHtmlSelection(e);
+                }
+                @Override public void mouseReleased(MouseEvent e) {
+                    if (popup(e)) openContextMenu(e);
+                    else { htmlSelecting = false; draggingWindow = false; }
+                }
                 @Override public void mouseWheelMoved(MouseWheelEvent e) { handleWheel(e); }
             };
             addMouseMotionListener(mouse);
@@ -284,6 +314,7 @@ public final class HtmlDomDevToolsWindow {
             toggleHits.clear();
             tabHits.clear();
             toolButtonHits.clear();
+            windowButtonHits.clear();
             computedHits.clear();
             keywordOptionHits.clear();
             colorPickerHits.clear();
@@ -309,19 +340,35 @@ public final class HtmlDomDevToolsWindow {
             g.drawLine(0, HEADER - 1, w, HEADER - 1);
             g.setFont(monoBold);
             g.setColor(TEXT);
-            g.drawString("Elements", 16, 27);
+            g.drawString("HtmlDom DevTools", 16, 27);
             HtmlDomDevToolsSnapshot snapshot = inspected.devToolsSnapshot();
             g.setFont(mono12);
             g.setColor(MUTED);
-            g.drawString("DOM " + snapshot.nodeCount() + " nodes  ·  boxes " + snapshot.layoutBoxCount() + "  ·  events " + inspected.devToolsEventLog().size() + (dirty ? "  ·  modified" : ""), 122, 27);
+            g.drawString("Elements  ·  DOM " + snapshot.nodeCount() + " nodes  ·  boxes " + snapshot.layoutBoxCount() + "  ·  events " + inspected.devToolsEventLog().size() + (dirty ? "  ·  modified" : ""), 174, 27);
             if (!saveStatus.isBlank()) {
                 g.setColor(dirty ? new Color(253, 214, 99) : new Color(129, 201, 149));
-                g.drawString(clip(saveStatus, 72), Math.max(380, w - 670), 27);
+                g.drawString(clip(saveStatus, 52), Math.max(400, w - 780), 27);
             }
-            int x = Math.max(520, w - 300);
+            int windowX = Math.max(0, w - 86);
+            drawWindowButton(g, windowX, 8, 34, I_MINUS, WindowCommand.MINIMIZE);
+            drawWindowButton(g, windowX + 40, 8, 34, I_TIMES, WindowCommand.CLOSE);
+            int x = Math.max(520, w - 390);
             drawToolButton(g, x, 8, 82, I_UNDO, "Undo", ToolCommand.UNDO, !undoStack.isEmpty());
             drawToolButton(g, x + 88, 8, 82, I_REDO, "Redo", ToolCommand.REDO, !redoStack.isEmpty());
             drawToolButton(g, x + 176, 8, 96, I_SAVE, "Save", ToolCommand.SAVE, dirty);
+        }
+
+        private void drawWindowButton(Graphics2D g, int x, int y, int w, String icon, WindowCommand command) {
+            Rectangle r = new Rectangle(x, y, w, 28);
+            windowButtonHits.add(new WindowButtonHit(r, command));
+            Point mouse = getMousePositionSafe();
+            boolean hovered = mouse != null && r.contains(mouse);
+            boolean close = command == WindowCommand.CLOSE;
+            g.setColor(hovered ? (close ? new Color(153, 27, 27) : new Color(55, 57, 64)) : new Color(43, 44, 48));
+            g.fillRoundRect(x, y, w, 28, 10, 10);
+            g.setColor(hovered && close ? new Color(248, 113, 113) : BORDER);
+            g.drawRoundRect(x, y, w - 1, 27, 10, 10);
+            drawIcon(g, icon, x + 11, y + 19, hovered && close ? Color.WHITE : TEXT, icon14);
         }
 
         private void drawToolButton(Graphics2D g, int x, int y, int w, String icon, String label, ToolCommand command, boolean enabled) {
@@ -638,6 +685,9 @@ public final class HtmlDomDevToolsWindow {
             colorPickerProperty = hit.property();
             colorPickerOriginalValue = hit.value() == null ? "" : hit.value();
             colorPickerColor = parsed == null ? Color.WHITE : parsed;
+            syncColorPickerHsbFromColor();
+            colorPickerEditingChannel = "";
+            colorPickerEditingValue = "";
             colorPickerUndoCaptured = false;
             Rectangle anchor = hit.swatchRect().width > 0 ? hit.swatchRect() : hit.valueRect();
             colorPickerAnchorX = anchor.x;
@@ -650,6 +700,11 @@ public final class HtmlDomDevToolsWindow {
             colorPickerProperty = "";
             colorPickerOriginalValue = "";
             colorPickerColor = Color.WHITE;
+            colorPickerHue = 0f;
+            colorPickerSaturation = 0f;
+            colorPickerBrightness = 1f;
+            colorPickerEditingChannel = "";
+            colorPickerEditingValue = "";
             colorPickerUndoCaptured = false;
             colorPickerRect = new Rectangle();
             colorPickerHits.clear();
@@ -657,64 +712,174 @@ public final class HtmlDomDevToolsWindow {
 
         private void drawColorPicker(Graphics2D g) {
             if (!colorPickerOpen()) return;
-            int popupW = 274;
-            int popupH = 186;
+            int popupW = 238;
+            int popupH = 326;
             int x = clamp(colorPickerAnchorX, LEFT_W + 8, Math.max(LEFT_W + 8, getWidth() - popupW - 8));
             int y = clamp(colorPickerAnchorY + 5, HEADER + 8, Math.max(HEADER + 8, getHeight() - popupH - 8));
             colorPickerRect = new Rectangle(x, y, popupW, popupH);
-            Composite old = g.getComposite();
-            g.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, 0.35f));
+
+            Composite oldComposite = g.getComposite();
+            g.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, 0.28f));
             g.setColor(Color.BLACK);
-            g.fillRoundRect(x + 5, y + 6, popupW, popupH, 16, 16);
-            g.setComposite(old);
+            g.fillRoundRect(x + 4, y + 5, popupW, popupH, 8, 8);
+            g.setComposite(oldComposite);
             g.setColor(new Color(248, 250, 252));
-            g.fillRoundRect(x, y, popupW, popupH, 16, 16);
+            g.fillRoundRect(x, y, popupW, popupH, 6, 6);
             g.setColor(new Color(203, 213, 225));
-            g.drawRoundRect(x, y, popupW - 1, popupH - 1, 16, 16);
+            g.drawRoundRect(x, y, popupW - 1, popupH - 1, 6, 6);
 
-            g.setFont(mono12.deriveFont(Font.BOLD));
-            g.setColor(new Color(15, 23, 42));
-            g.drawString(clip(colorPickerProperty, 28), x + 14, y + 22);
-            Rectangle close = new Rectangle(x + popupW - 30, y + 7, 20, 20);
-            colorPickerHits.add(new ColorPickerHit(close, "close"));
-            g.setColor(new Color(226, 232, 240));
-            g.fillRoundRect(close.x, close.y, close.width, close.height, 8, 8);
-            g.setColor(new Color(51, 65, 85));
-            g.drawString("×", close.x + 6, close.y + 15);
+            Rectangle sv = new Rectangle(x, y, popupW, 170);
+            colorPickerHits.add(new ColorPickerHit(sv, "sv"));
+            drawSaturationValueSquare(g, sv);
+            int svKnobX = sv.x + Math.round(clampUnit(colorPickerSaturation) * (sv.width - 1));
+            int svKnobY = sv.y + Math.round((1f - clampUnit(colorPickerBrightness)) * (sv.height - 1));
+            drawColorPickerTarget(g, svKnobX, svKnobY);
 
-            Rectangle preview = new Rectangle(x + 14, y + 34, 54, 38);
-            drawColorSwatch(g, preview, colorPickerColor);
-            g.setFont(mono12);
-            g.setColor(new Color(51, 65, 85));
-            g.drawString(HtmlDomDevToolsCssValue.formatColor(colorPickerColor), x + 78, y + 51);
-            g.setColor(new Color(100, 116, 139));
-            g.drawString("alpha " + colorPickerColor.getAlpha() + "/255", x + 78, y + 68);
+            int controlsY = y + sv.height + 8;
+            Rectangle eyedropper = new Rectangle(x + 12, controlsY + 10, 18, 18);
+            colorPickerHits.add(new ColorPickerHit(eyedropper, "eyedropper"));
+            drawEyedropper(g, eyedropper);
 
-            int sx = x + 14;
-            int sy = y + 86;
-            drawColorSlider(g, "R", colorPickerColor.getRed(), sx, sy, popupW - 28, "r", new Color(239, 68, 68));
-            drawColorSlider(g, "G", colorPickerColor.getGreen(), sx, sy + 24, popupW - 28, "g", new Color(34, 197, 94));
-            drawColorSlider(g, "B", colorPickerColor.getBlue(), sx, sy + 48, popupW - 28, "b", new Color(59, 130, 246));
-            drawColorSlider(g, "A", colorPickerColor.getAlpha(), sx, sy + 72, popupW - 28, "a", new Color(107, 114, 128));
+            Rectangle preview = new Rectangle(x + 48, controlsY + 5, 31, 31);
+            drawColorPreviewCircle(g, preview);
+
+            Rectangle hue = new Rectangle(x + 90, controlsY + 7, popupW - 108, 12);
+            colorPickerHits.add(new ColorPickerHit(hue, "hue"));
+            drawHueTrack(g, hue);
+            drawSliderKnob(g, hue.x + Math.round(clampUnit(colorPickerHue) * (hue.width - 1)), hue.y + hue.height / 2);
+
+            Rectangle alpha = new Rectangle(x + 90, controlsY + 25, popupW - 108, 12);
+            colorPickerHits.add(new ColorPickerHit(alpha, "alpha"));
+            drawAlphaTrack(g, alpha);
+            drawSliderKnob(g, alpha.x + Math.round((alpha.width - 1) * (colorPickerColor.getAlpha() / 255f)), alpha.y + alpha.height / 2);
+
+            int fieldY = controlsY + 48;
+            int fieldW = 40;
+            int fieldGap = 8;
+            int fieldX = x + 18;
+            drawColorNumberField(g, "r", Integer.toString(colorPickerColor.getRed()), fieldX, fieldY, fieldW);
+            drawColorNumberField(g, "g", Integer.toString(colorPickerColor.getGreen()), fieldX + (fieldW + fieldGap), fieldY, fieldW);
+            drawColorNumberField(g, "b", Integer.toString(colorPickerColor.getBlue()), fieldX + 2 * (fieldW + fieldGap), fieldY, fieldW);
+            drawColorNumberField(g, "a", colorPickerAlphaFieldValue(), fieldX + 3 * (fieldW + fieldGap), fieldY, fieldW);
+
+            drawColorPresetGrid(g, x + 16, fieldY + 54, popupW - 32);
         }
 
-        private void drawColorSlider(Graphics2D g, String label, int value, int x, int y, int w, String channel, Color fill) {
-            g.setFont(mono12);
-            g.setColor(new Color(51, 65, 85));
-            g.drawString(label, x, y + 14);
-            Rectangle bar = new Rectangle(x + 26, y + 5, Math.max(80, w - 70), 10);
-            colorPickerHits.add(new ColorPickerHit(bar, channel));
-            g.setColor(new Color(226, 232, 240));
-            g.fillRoundRect(bar.x, bar.y, bar.width, bar.height, 7, 7);
-            int filled = Math.round(bar.width * (Math.max(0, Math.min(255, value)) / 255f));
-            g.setColor(fill);
-            g.fillRoundRect(bar.x, bar.y, filled, bar.height, 7, 7);
-            int knob = bar.x + Math.max(0, Math.min(bar.width - 1, Math.round((bar.width - 1) * value / 255f)));
+        private void drawSaturationValueSquare(Graphics2D g, Rectangle r) {
+            if (r.width <= 0 || r.height <= 0) return;
+            BufferedImage image = new BufferedImage(r.width, r.height, BufferedImage.TYPE_INT_RGB);
+            int maxX = Math.max(1, r.width - 1);
+            int maxY = Math.max(1, r.height - 1);
+            for (int yy = 0; yy < r.height; yy++) {
+                float brightness = 1f - yy / (float) maxY;
+                for (int xx = 0; xx < r.width; xx++) {
+                    float saturation = xx / (float) maxX;
+                    image.setRGB(xx, yy, Color.HSBtoRGB(clampUnit(colorPickerHue), saturation, brightness));
+                }
+            }
+            g.drawImage(image, r.x, r.y, null);
+            g.setColor(new Color(0, 0, 0, 38));
+            g.drawRect(r.x, r.y, r.width - 1, r.height - 1);
+        }
+
+        private void drawHueTrack(Graphics2D g, Rectangle r) {
+            for (int xx = 0; xx < r.width; xx++) {
+                float hue = xx / (float) Math.max(1, r.width - 1);
+                g.setColor(Color.getHSBColor(hue, 1f, 1f));
+                g.drawLine(r.x + xx, r.y, r.x + xx, r.y + r.height - 1);
+            }
+            g.setColor(new Color(148, 163, 184));
+            g.drawRoundRect(r.x, r.y, r.width - 1, r.height - 1, 10, 10);
+        }
+
+        private void drawAlphaTrack(Graphics2D g, Rectangle r) {
+            drawCheckerboard(g, r, 4);
+            Color rgb = colorFromHsb(255);
+            for (int xx = 0; xx < r.width; xx++) {
+                int alpha = Math.round(xx / (float) Math.max(1, r.width - 1) * 255f);
+                g.setColor(new Color(rgb.getRed(), rgb.getGreen(), rgb.getBlue(), alpha));
+                g.drawLine(r.x + xx, r.y, r.x + xx, r.y + r.height - 1);
+            }
+            g.setColor(new Color(148, 163, 184));
+            g.drawRoundRect(r.x, r.y, r.width - 1, r.height - 1, 10, 10);
+        }
+
+        private void drawCheckerboard(Graphics2D g, Rectangle r, int cell) {
+            int size = Math.max(2, cell);
+            for (int yy = r.y; yy < r.y + r.height; yy += size) {
+                for (int xx = r.x; xx < r.x + r.width; xx += size) {
+                    boolean dark = (((xx - r.x) / size) + ((yy - r.y) / size)) % 2 == 0;
+                    g.setColor(dark ? new Color(203, 213, 225) : new Color(241, 245, 249));
+                    g.fillRect(xx, yy, Math.min(size, r.x + r.width - xx), Math.min(size, r.y + r.height - yy));
+                }
+            }
+        }
+
+        private void drawColorPickerTarget(Graphics2D g, int cx, int cy) {
+            g.setStroke(new BasicStroke(2f));
             g.setColor(Color.WHITE);
-            g.fillOval(knob - 4, bar.y - 3, 8, 16);
-            g.setColor(new Color(71, 85, 105));
-            g.drawOval(knob - 4, bar.y - 3, 8, 16);
-            g.drawString(Integer.toString(value), bar.x + bar.width + 10, y + 14);
+            g.drawOval(cx - 6, cy - 6, 12, 12);
+            g.setColor(new Color(15, 23, 42));
+            g.drawOval(cx - 5, cy - 5, 10, 10);
+            g.setStroke(new BasicStroke(1f));
+        }
+
+        private void drawSliderKnob(Graphics2D g, int cx, int cy) {
+            g.setColor(Color.WHITE);
+            g.fillOval(cx - 6, cy - 6, 12, 12);
+            g.setColor(new Color(148, 163, 184));
+            g.drawOval(cx - 6, cy - 6, 12, 12);
+        }
+
+        private void drawColorPreviewCircle(Graphics2D g, Rectangle r) {
+            Shape oldClip = g.getClip();
+            g.setClip(new Ellipse2D.Float(r.x, r.y, r.width, r.height));
+            drawCheckerboard(g, r, 5);
+            g.setColor(colorPickerColor);
+            g.fillOval(r.x, r.y, r.width, r.height);
+            g.setClip(oldClip);
+            g.setColor(new Color(203, 213, 225));
+            g.drawOval(r.x, r.y, r.width - 1, r.height - 1);
+        }
+
+        private void drawEyedropper(Graphics2D g, Rectangle r) {
+            Point mouse = getMousePositionSafe();
+            boolean hovered = mouse != null && r.contains(mouse);
+            g.setFont(icon14);
+            g.setColor(hovered ? ACCENT : new Color(15, 23, 42));
+            g.drawString(I_DROPPER, r.x + 1, r.y + 15);
+        }
+
+        private void drawColorNumberField(Graphics2D g, String channel, String value, int x, int y, int w) {
+            Rectangle box = new Rectangle(x, y, w, 24);
+            colorPickerHits.add(new ColorPickerHit(box, "field:" + channel));
+            boolean editing = channel.equals(colorPickerEditingChannel);
+            String display = editing ? colorPickerEditingValue : value;
+            g.setColor(editing ? new Color(255, 255, 255) : new Color(248, 250, 252));
+            g.fillRoundRect(box.x, box.y, box.width, box.height, 4, 4);
+            g.setColor(editing ? ACCENT : new Color(203, 213, 225));
+            g.drawRoundRect(box.x, box.y, box.width - 1, box.height - 1, 4, 4);
+            g.setFont(mono12);
+            g.setColor(new Color(15, 23, 42));
+            g.drawString(clip(display, 5), box.x + 7, box.y + 16);
+            g.setColor(new Color(100, 116, 139));
+            g.drawString(channel.toUpperCase(Locale.ROOT), box.x + 17, box.y + 39);
+        }
+
+        private void drawColorPresetGrid(Graphics2D g, int x, int y, int maxW) {
+            int cell = 12;
+            int gap = 10;
+            int columns = Math.max(1, (maxW + gap) / (cell + gap));
+            for (int i = 0; i < COLOR_PICKER_PRESETS.length; i++) {
+                int col = i % columns;
+                int row = i / columns;
+                Rectangle swatch = new Rectangle(x + col * (cell + gap), y + row * 20, cell, cell);
+                colorPickerHits.add(new ColorPickerHit(swatch, "preset:" + COLOR_PICKER_PRESETS[i]));
+                g.setColor(new Color(COLOR_PICKER_PRESETS[i]));
+                g.fillRect(swatch.x, swatch.y, swatch.width, swatch.height);
+                g.setColor(new Color(203, 213, 225));
+                g.drawRect(swatch.x, swatch.y, swatch.width - 1, swatch.height - 1);
+            }
         }
 
         private boolean handleKeywordPopupClick(Point point) {
@@ -733,30 +898,194 @@ public final class HtmlDomDevToolsWindow {
             if (!colorPickerOpen()) return false;
             for (ColorPickerHit hit : colorPickerHits) {
                 if (!hit.rect().contains(point)) continue;
-                if ("close".equals(hit.channel())) {
-                    closeColorPicker();
+                String channel = hit.channel();
+                if (channel.startsWith("field:")) {
+                    beginColorFieldEdit(channel.substring("field:".length()));
                     repaint();
                     return true;
                 }
-                int next = sliderValue(hit.rect(), point.x);
-                colorPickerColor = switch (hit.channel()) {
-                    case "r" -> new Color(next, colorPickerColor.getGreen(), colorPickerColor.getBlue(), colorPickerColor.getAlpha());
-                    case "g" -> new Color(colorPickerColor.getRed(), next, colorPickerColor.getBlue(), colorPickerColor.getAlpha());
-                    case "b" -> new Color(colorPickerColor.getRed(), colorPickerColor.getGreen(), next, colorPickerColor.getAlpha());
-                    case "a" -> new Color(colorPickerColor.getRed(), colorPickerColor.getGreen(), colorPickerColor.getBlue(), next);
-                    default -> colorPickerColor;
-                };
-                applyColorPickerValue();
+                if (!colorPickerEditingChannel.isBlank()) commitColorFieldEdit();
+                switch (channel) {
+                    case "sv" -> updateColorPickerFromSaturationValue(hit.rect(), point);
+                    case "hue" -> updateColorPickerFromHue(hit.rect(), point);
+                    case "alpha" -> updateColorPickerFromAlpha(hit.rect(), point);
+                    case "eyedropper" -> saveStatus = "eyedropper: click a rendered color swatch or preset";
+                    default -> {
+                        if (channel.startsWith("preset:")) {
+                            int rgb = Integer.parseInt(channel.substring("preset:".length()));
+                            colorPickerColor = new Color((rgb >> 16) & 0xFF, (rgb >> 8) & 0xFF, rgb & 0xFF, colorPickerColor.getAlpha());
+                            syncColorPickerHsbFromColor();
+                            applyColorPickerValue();
+                        }
+                    }
+                }
                 repaint();
                 return true;
             }
             return colorPickerRect.contains(point);
         }
 
-        private int sliderValue(Rectangle slider, int x) {
-            if (slider == null || slider.width <= 1) return 0;
-            float t = (x - slider.x) / (float) Math.max(1, slider.width - 1);
-            return Math.max(0, Math.min(255, Math.round(t * 255f)));
+        private void updateColorPickerFromSaturationValue(Rectangle rect, Point point) {
+            colorPickerSaturation = unitValue(rect, point.x);
+            float brightnessY = rect.height <= 1 ? 0f : clampUnit((point.y - rect.y) / (float) Math.max(1, rect.height - 1));
+            colorPickerBrightness = 1f - brightnessY;
+            colorPickerColor = colorFromHsb(colorPickerColor.getAlpha());
+            applyColorPickerValue();
+        }
+
+        private void updateColorPickerFromHue(Rectangle rect, Point point) {
+            colorPickerHue = unitValue(rect, point.x);
+            colorPickerColor = colorFromHsb(colorPickerColor.getAlpha());
+            applyColorPickerValue();
+        }
+
+        private void updateColorPickerFromAlpha(Rectangle rect, Point point) {
+            int alpha = Math.round(unitValue(rect, point.x) * 255f);
+            colorPickerColor = new Color(colorPickerColor.getRed(), colorPickerColor.getGreen(), colorPickerColor.getBlue(), alpha);
+            applyColorPickerValue();
+        }
+
+        private float unitValue(Rectangle rect, int x) {
+            if (rect == null || rect.width <= 1) return 0f;
+            return clampUnit((x - rect.x) / (float) Math.max(1, rect.width - 1));
+        }
+
+        private Color colorFromHsb(int alpha) {
+            int rgb = Color.HSBtoRGB(clampUnit(colorPickerHue), clampUnit(colorPickerSaturation), clampUnit(colorPickerBrightness));
+            Color base = new Color(rgb);
+            return new Color(base.getRed(), base.getGreen(), base.getBlue(), clamp(alpha, 0, 255));
+        }
+
+        private void syncColorPickerHsbFromColor() {
+            float[] hsb = Color.RGBtoHSB(colorPickerColor.getRed(), colorPickerColor.getGreen(), colorPickerColor.getBlue(), null);
+            colorPickerHue = hsb[0];
+            colorPickerSaturation = hsb[1];
+            colorPickerBrightness = hsb[2];
+        }
+
+        private float clampUnit(float value) {
+            return Math.max(0f, Math.min(1f, value));
+        }
+
+        private String colorPickerAlphaFieldValue() {
+            double alpha = colorPickerColor.getAlpha() / 255.0;
+            if (Math.abs(alpha - Math.rint(alpha)) < 0.000_001) return Long.toString(Math.round(alpha));
+            String out = String.format(Locale.ROOT, "%.3f", alpha);
+            while (out.contains(".") && out.endsWith("0")) out = out.substring(0, out.length() - 1);
+            if (out.endsWith(".")) out = out.substring(0, out.length() - 1);
+            return out;
+        }
+
+        private void beginColorFieldEdit(String channel) {
+            colorPickerEditingChannel = switch (channel) {
+                case "r", "g", "b", "a" -> channel;
+                default -> "";
+            };
+            colorPickerEditingValue = switch (colorPickerEditingChannel) {
+                case "r" -> Integer.toString(colorPickerColor.getRed());
+                case "g" -> Integer.toString(colorPickerColor.getGreen());
+                case "b" -> Integer.toString(colorPickerColor.getBlue());
+                case "a" -> colorPickerAlphaFieldValue();
+                default -> "";
+            };
+            requestFocusInWindow();
+        }
+
+        private boolean handleColorPickerKeyPressed(KeyEvent e) {
+            if (!colorPickerOpen()) return false;
+            if (!colorPickerEditingChannel.isBlank()) {
+                switch (e.getKeyCode()) {
+                    case KeyEvent.VK_ENTER -> commitColorFieldEdit();
+                    case KeyEvent.VK_ESCAPE -> cancelColorFieldEdit();
+                    case KeyEvent.VK_BACK_SPACE -> {
+                        if (!colorPickerEditingValue.isEmpty()) colorPickerEditingValue = colorPickerEditingValue.substring(0, colorPickerEditingValue.length() - 1);
+                    }
+                    case KeyEvent.VK_DELETE -> colorPickerEditingValue = "";
+                    case KeyEvent.VK_UP -> nudgeColorField(1);
+                    case KeyEvent.VK_DOWN -> nudgeColorField(-1);
+                    default -> { return false; }
+                }
+                repaint();
+                e.consume();
+                return true;
+            }
+            if (e.getKeyCode() == KeyEvent.VK_ESCAPE) {
+                closeColorPicker();
+                repaint();
+                e.consume();
+                return true;
+            }
+            return false;
+        }
+
+        private boolean handleColorPickerKeyTyped(KeyEvent e) {
+            if (!colorPickerOpen() || colorPickerEditingChannel.isBlank()) return false;
+            char ch = e.getKeyChar();
+            if (ch == KeyEvent.CHAR_UNDEFINED || ch == 10 || ch == 13 || ch == 8 || ch == 127 || Character.isISOControl(ch)) return false;
+            if (Character.isDigit(ch) || ch == '.' && "a".equals(colorPickerEditingChannel)) {
+                colorPickerEditingValue += ch;
+                repaint();
+                e.consume();
+                return true;
+            }
+            return false;
+        }
+
+        private void nudgeColorField(int direction) {
+            try {
+                if ("a".equals(colorPickerEditingChannel)) {
+                    double parsed = colorPickerEditingValue.isBlank() ? colorPickerColor.getAlpha() / 255.0 : Double.parseDouble(colorPickerEditingValue);
+                    if (parsed <= 1.0) parsed = Math.max(0.0, Math.min(1.0, parsed + direction * 0.01));
+                    else parsed = Math.max(0.0, Math.min(255.0, parsed + direction));
+                    colorPickerEditingValue = colorPickerEditingValue.contains(".") || parsed <= 1.0 ? String.format(Locale.ROOT, "%.2f", parsed) : Integer.toString((int) Math.round(parsed));
+                    return;
+                }
+                int parsed = colorPickerEditingValue.isBlank() ? 0 : Integer.parseInt(colorPickerEditingValue);
+                colorPickerEditingValue = Integer.toString(clamp(parsed + direction, 0, 255));
+            } catch (RuntimeException ignored) {
+                colorPickerEditingValue = "";
+            }
+        }
+
+        private void commitColorFieldEdit() {
+            if (colorPickerEditingChannel.isBlank()) return;
+            try {
+                int r = colorPickerColor.getRed();
+                int g = colorPickerColor.getGreen();
+                int b = colorPickerColor.getBlue();
+                int a = colorPickerColor.getAlpha();
+                switch (colorPickerEditingChannel) {
+                    case "r" -> r = parseRgbField(colorPickerEditingValue);
+                    case "g" -> g = parseRgbField(colorPickerEditingValue);
+                    case "b" -> b = parseRgbField(colorPickerEditingValue);
+                    case "a" -> a = parseAlphaField(colorPickerEditingValue);
+                    default -> { }
+                }
+                colorPickerColor = new Color(r, g, b, a);
+                syncColorPickerHsbFromColor();
+                applyColorPickerValue();
+                colorPickerEditingChannel = "";
+                colorPickerEditingValue = "";
+            } catch (RuntimeException ex) {
+                saveStatus = "invalid color channel: " + colorPickerEditingChannel;
+            }
+        }
+
+        private void cancelColorFieldEdit() {
+            colorPickerEditingChannel = "";
+            colorPickerEditingValue = "";
+        }
+
+        private int parseRgbField(String raw) {
+            if (raw == null || raw.isBlank()) return 0;
+            return clamp(Math.round(Float.parseFloat(raw.trim())), 0, 255);
+        }
+
+        private int parseAlphaField(String raw) {
+            if (raw == null || raw.isBlank()) return 255;
+            float parsed = Float.parseFloat(raw.trim());
+            if (parsed <= 1f) return clamp(Math.round(parsed * 255f), 0, 255);
+            return clamp(Math.round(parsed), 0, 255);
         }
 
         private void applyColorPickerValue() {
@@ -1100,6 +1429,10 @@ public final class HtmlDomDevToolsWindow {
         }
 
         private void handleDrag(MouseEvent e) {
+            if (draggingWindow) {
+                moveToolWindow(e);
+                return;
+            }
             if (colorPickerOpen() && colorPickerRect.contains(e.getPoint())) {
                 handleColorPickerClick(e.getPoint());
                 return;
@@ -1112,6 +1445,48 @@ public final class HtmlDomDevToolsWindow {
             htmlSelectionFocus = offset;
             htmlCaretIndex = offset;
             repaint();
+        }
+
+        private boolean beginWindowDrag(MouseEvent e) {
+            Point point = e.getPoint();
+            if (point == null || point.y < 0 || point.y >= HEADER) return false;
+            for (WindowButtonHit hit : windowButtonHits) if (hit.rect().contains(point)) return false;
+            for (ToolButtonHit hit : toolButtonHits) if (hit.rect.contains(point)) return false;
+            Window current = frame;
+            if (current == null) return false;
+            draggingWindow = true;
+            windowDragStartScreen = e.getLocationOnScreen();
+            windowDragStartLocation = current.getLocation();
+            requestFocusInWindow();
+            return true;
+        }
+
+        private void moveToolWindow(MouseEvent e) {
+            Window current = frame;
+            if (current == null) return;
+            Point screen = e.getLocationOnScreen();
+            int dx = screen.x - windowDragStartScreen.x;
+            int dy = screen.y - windowDragStartScreen.y;
+            current.setLocation(windowDragStartLocation.x + dx, windowDragStartLocation.y + dy);
+        }
+
+        private boolean handleWindowButtonClick(Point point) {
+            if (point == null) return false;
+            for (WindowButtonHit hit : windowButtonHits) {
+                if (!hit.rect().contains(point)) continue;
+                executeWindowCommand(hit.command());
+                return true;
+            }
+            return false;
+        }
+
+        private void executeWindowCommand(WindowCommand command) {
+            Window current = frame;
+            if (command == null || current == null) return;
+            switch (command) {
+                case CLOSE -> closeOnEdt();
+                case MINIMIZE -> current.setVisible(false);
+            }
         }
 
         private void beginHtmlSelection(MouseEvent e) {
@@ -1168,6 +1543,7 @@ public final class HtmlDomDevToolsWindow {
                 repaint();
                 return;
             }
+            if (handleWindowButtonClick(e.getPoint())) return;
             for (ToolButtonHit hit : toolButtonHits) if (hit.rect.contains(e.getPoint())) {
                 if (hit.enabled) executeToolCommand(hit.command);
                 repaint();
@@ -1213,8 +1589,7 @@ public final class HtmlDomDevToolsWindow {
                 rightScroll = 0;
                 closeKeywordPopup();
                 closeColorPicker();
-                editingComputedProperty = "";
-                editingComputedValue = "";
+                clearComputedEditState();
                 repaint();
                 return;
             }
@@ -1223,8 +1598,7 @@ public final class HtmlDomDevToolsWindow {
                 rightScroll = 0;
                 closeKeywordPopup();
                 closeColorPicker();
-                editingComputedProperty = "";
-                editingComputedValue = "";
+                clearComputedEditState();
                 inspected.setDevToolsHighlightedNodeId(hit.nodeId);
                 if (e.getClickCount() >= 2) toggleNode(hit.nodeId);
                 repaint();
@@ -1238,24 +1612,54 @@ public final class HtmlDomDevToolsWindow {
             closeColorPicker();
             editingComputedProperty = hit.property();
             editingComputedValue = hit.value() == null ? "" : hit.value();
+            editingComputedOriginalValue = editingComputedValue;
+            editingComputedLastAppliedValue = editingComputedValue;
+            editingComputedLiveApplied = false;
             contextMenuOpen = false;
             requestFocusInWindow();
         }
 
         private void cancelComputedEdit() {
             if (editingComputedProperty.isBlank()) return;
+            clearComputedEditState();
+            repaint();
+        }
+
+        private void revertComputedEdit() {
+            if (editingComputedProperty.isBlank()) return;
+            String property = editingComputedProperty;
+            String originalValue = editingComputedOriginalValue;
+            boolean restore = editingComputedLiveApplied;
+            clearComputedEditState();
+            if (restore) {
+                applyComputedValue(property, originalValue, false);
+                saveStatus = "runtime style reverted: " + property;
+            } else {
+                repaint();
+            }
+        }
+
+        private void clearComputedEditState() {
             editingComputedProperty = "";
             editingComputedValue = "";
-            repaint();
+            editingComputedOriginalValue = "";
+            editingComputedLastAppliedValue = "";
+            editingComputedLiveApplied = false;
         }
 
         private void commitComputedEdit() {
             if (editingComputedProperty.isBlank()) return;
             String property = editingComputedProperty;
             String value = editingComputedValue.trim();
-            editingComputedProperty = "";
-            editingComputedValue = "";
-            applyComputedValue(property, value, true);
+            boolean alreadyApplied = editingComputedLiveApplied && value.equals(editingComputedLastAppliedValue);
+            boolean useExistingUndoSnapshot = editingComputedLiveApplied;
+            clearComputedEditState();
+            if (alreadyApplied) {
+                saveStatus = "runtime style: " + property;
+                repaint();
+                return;
+            }
+            applyComputedValue(property, value, !useExistingUndoSnapshot);
         }
 
         private void applyComputedValue(String property, String value, boolean undoable) {
@@ -1277,6 +1681,19 @@ public final class HtmlDomDevToolsWindow {
             repaint();
         }
 
+        private void applyComputedLivePreview(String property, String value) {
+            if (property == null || property.isBlank()) return;
+            if (!editingComputedLiveApplied) {
+                undoStack.add(HtmlDomDevToolsNodeSnapshot.copy(inspected.document().documentElement()));
+                while (undoStack.size() > 128) undoStack.remove(0);
+                redoStack.clear();
+                editingComputedLiveApplied = true;
+            }
+            editingComputedLastAppliedValue = value == null ? "" : value.trim();
+            applyComputedValue(property, editingComputedLastAppliedValue, false);
+            saveStatus = "runtime style live: " + property;
+        }
+
         private String selectedComputedValue(String property) {
             UiDomNode node = nodeById(selectedNodeId);
             if (!(node instanceof UiDomElement element)) return "";
@@ -1287,7 +1704,7 @@ public final class HtmlDomDevToolsWindow {
             if (editingComputedProperty.isBlank()) return false;
             if (HtmlDomDevToolsCssValue.metricValue(editingComputedValue)) {
                 editingComputedValue = HtmlDomDevToolsCssValue.nudgeMetric(editingComputedValue, direction, e.isShiftDown(), e.isAltDown());
-                repaint();
+                applyComputedLivePreview(editingComputedProperty, editingComputedValue);
                 return true;
             }
             List<String> options = HtmlDomDevToolsCssValue.keywordOptions(editingComputedProperty);
@@ -1311,9 +1728,12 @@ public final class HtmlDomDevToolsWindow {
                 handleHtmlEditKeyPressed(e);
                 return;
             }
-            if (colorPickerOpen() || keywordPopupOpen()) {
+            if (colorPickerOpen()) {
+                if (handleColorPickerKeyPressed(e)) return;
+                return;
+            }
+            if (keywordPopupOpen()) {
                 if (e.getKeyCode() == KeyEvent.VK_ESCAPE) {
-                    closeColorPicker();
                     closeKeywordPopup();
                     repaint();
                     e.consume();
@@ -1323,7 +1743,7 @@ public final class HtmlDomDevToolsWindow {
             if (editingComputedProperty.isBlank()) return;
             switch (e.getKeyCode()) {
                 case KeyEvent.VK_ENTER -> { commitComputedEdit(); e.consume(); }
-                case KeyEvent.VK_ESCAPE -> { cancelComputedEdit(); e.consume(); }
+                case KeyEvent.VK_ESCAPE -> { revertComputedEdit(); e.consume(); }
                 case KeyEvent.VK_UP -> { if (nudgeComputedEdit(1, e)) e.consume(); }
                 case KeyEvent.VK_DOWN -> { if (nudgeComputedEdit(-1, e)) e.consume(); }
                 case KeyEvent.VK_BACK_SPACE -> {
@@ -1343,6 +1763,10 @@ public final class HtmlDomDevToolsWindow {
         private void handleKeyTyped(KeyEvent e) {
             if (htmlEditMode && "HTML".equals(activeTab)) {
                 handleHtmlEditKeyTyped(e);
+                return;
+            }
+            if (colorPickerOpen()) {
+                if (handleColorPickerKeyTyped(e)) return;
                 return;
             }
             if (editingComputedProperty.isBlank()) return;
@@ -1488,7 +1912,9 @@ public final class HtmlDomDevToolsWindow {
         }
 
         private void openContextMenu(MouseEvent e) {
-            int node = nodeAt(e.getPoint());
+            Point point = e.getPoint();
+            int node = nodeAt(point);
+            if (node <= 0 && selectedNodeId > 0 && point.x >= LEFT_W) node = selectedNodeId;
             if (node <= 0) return;
             selectedNodeId = node;
             hoverNodeId = node;
@@ -1497,6 +1923,10 @@ public final class HtmlDomDevToolsWindow {
             contextMenuX = e.getX();
             contextMenuY = e.getY();
             contextMenuOpen = true;
+            closeKeywordPopup();
+            closeColorPicker();
+            editingComputedProperty = "";
+            editingComputedValue = "";
             repaint();
         }
 
@@ -1751,14 +2181,14 @@ public final class HtmlDomDevToolsWindow {
         boolean element = node instanceof UiDomElement;
         boolean removable = hasNode && node.parent() != null;
         return List.of(
-                new MenuItem(MenuCommand.ADD_ATTRIBUTE, I_PLUS, "Добавить атрибут", element, false),
-                new MenuItem(MenuCommand.EDIT_HTML, I_CODE, "Редактировать как HTML", element, false),
-                new MenuItem(MenuCommand.DUPLICATE, I_CLONE, "Дублировать элемент", removable, false),
-                new MenuItem(MenuCommand.DELETE, I_TRASH, "Удалить элемент", removable, false),
+                new MenuItem(MenuCommand.EDIT_HTML, I_CODE, "Edit Block", element, false),
+                new MenuItem(MenuCommand.COPY, I_COPY, "Copy Block", hasNode, false),
+                new MenuItem(MenuCommand.DUPLICATE, I_CLONE, "Duplicate Block", removable, false),
+                new MenuItem(MenuCommand.DELETE, I_TRASH, "Delete Block", removable, false),
                 MenuItem.separatorItem(),
-                new MenuItem(MenuCommand.CUT, I_SCISSORS, "Вырезать", removable, false),
-                new MenuItem(MenuCommand.COPY, I_COPY, "Скопировать", hasNode, false),
-                new MenuItem(MenuCommand.PASTE, I_PASTE, "Вставить", clipboard != null && hasNode, false)
+                new MenuItem(MenuCommand.ADD_ATTRIBUTE, I_PLUS, "Add Attribute", element, false),
+                new MenuItem(MenuCommand.CUT, I_SCISSORS, "Cut Block", removable, false),
+                new MenuItem(MenuCommand.PASTE, I_PASTE, "Paste Block", clipboard != null && hasNode, false)
         );
     }
 
@@ -1882,6 +2312,7 @@ public final class HtmlDomDevToolsWindow {
     }
 
     private enum ToolCommand { UNDO, REDO, SAVE }
+    private enum WindowCommand { MINIMIZE, CLOSE }
     private enum HtmlEditCommand { APPLY, CANCEL }
     private enum MenuCommand { ADD_ATTRIBUTE, EDIT_HTML, DUPLICATE, DELETE, CUT, COPY, PASTE }
     private record DomRow(UiDomNode node, int depth) { }
@@ -1894,6 +2325,7 @@ public final class HtmlDomDevToolsWindow {
     private record HtmlEditButtonHit(Rectangle rect, HtmlEditCommand command) { }
     private record HtmlLineHit(Rectangle row, int textX, int baseline, int startOffset, int endOffset, String text) { }
     private record ToolButtonHit(Rectangle rect, ToolCommand command, boolean enabled) { }
+    private record WindowButtonHit(Rectangle rect, WindowCommand command) { }
     private record MenuHit(Rectangle rect, MenuCommand command, boolean enabled) { }
     private record MenuItem(MenuCommand command, String icon, String label, boolean enabled, boolean separator) {
         static MenuItem separatorItem() { return new MenuItem(null, "", "", false, true); }

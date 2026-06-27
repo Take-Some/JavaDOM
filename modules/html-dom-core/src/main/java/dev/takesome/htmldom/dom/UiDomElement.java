@@ -1,5 +1,6 @@
 package dev.takesome.htmldom.dom;
 
+import dev.takesome.htmldom.css.UiCssStyleImpact;
 
 import static dev.takesome.htmldom.support.validation.HtmlDomValidator.emptyIfNull;
 import static dev.takesome.htmldom.support.validation.HtmlDomValidator.trimToEmpty;
@@ -16,6 +17,7 @@ public final class UiDomElement extends UiDomNode {
     private final String tagName;
     private final LinkedHashMap<String, String> attributes = new LinkedHashMap<>();
     private final LinkedHashMap<String, String> computedStyle = new LinkedHashMap<>();
+    private final LinkedHashMap<String, String> animatedComputedStyle = new LinkedHashMap<>();
     private final LinkedHashMap<String, LinkedHashMap<String, String>> pseudoComputedStyle = new LinkedHashMap<>();
     private final LinkedHashSet<String> pseudoClasses = new LinkedHashSet<>();
     private final UiDomTokenList classList = new UiDomTokenList(this);
@@ -48,12 +50,14 @@ public final class UiDomElement extends UiDomNode {
     }
 
     public Map<String, String> attributes() {
-        return Collections.unmodifiableMap(attributes);
+        synchronized (attributes) {
+            return Collections.unmodifiableMap(new LinkedHashMap<>(attributes));
+        }
     }
 
     public Map<String, String> dataset() {
         LinkedHashMap<String, String> out = new LinkedHashMap<>();
-        for (Map.Entry<String, String> entry : attributes.entrySet()) {
+        for (Map.Entry<String, String> entry : attributes().entrySet()) {
             String key = entry.getKey();
             if (key.startsWith("data-") && key.length() > 5) {
                 out.put(datasetName(key.substring(5)), entry.getValue());
@@ -73,7 +77,9 @@ public final class UiDomElement extends UiDomNode {
     }
 
     public boolean hasAttribute(String name) {
-        return attributes.containsKey(normalizeName(name, "attribute name"));
+        synchronized (attributes) {
+            return attributes.containsKey(normalizeName(name, "attribute name"));
+        }
     }
 
     public String attribute(String name) {
@@ -81,42 +87,75 @@ public final class UiDomElement extends UiDomNode {
     }
 
     public String attribute(String name, String fallback) {
-        String value = attributes.get(normalizeName(name, "attribute name"));
-        return value == null ? fallback : value;
+        synchronized (attributes) {
+            String value = attributes.get(normalizeName(name, "attribute name"));
+            return value == null ? fallback : value;
+        }
     }
 
     public void setAttribute(String name, String value) {
         String key = normalizeName(name, "attribute name");
         String next = emptyIfNull(value);
-        String old = attributes.put(key, next);
+        String old;
+        synchronized (attributes) {
+            old = attributes.put(key, next);
+        }
         if (Objects.equals(old, next)) return;
         markDirty(UiDomMutationType.ATTRIBUTE_CHANGED, key, old, next);
     }
 
     public void removeAttribute(String name) {
         String key = normalizeName(name, "attribute name");
-        if (!attributes.containsKey(key)) return;
-        String old = attributes.remove(key);
+        String old;
+        synchronized (attributes) {
+            if (!attributes.containsKey(key)) return;
+            old = attributes.remove(key);
+        }
         markDirty(UiDomMutationType.ATTRIBUTE_REMOVED, key, old, "");
     }
 
     public Set<String> pseudoClasses() {
-        return Collections.unmodifiableSet(pseudoClasses);
+        synchronized (pseudoClasses) {
+            return Collections.unmodifiableSet(new LinkedHashSet<>(pseudoClasses));
+        }
     }
 
     public boolean hasPseudoClass(String name) {
         String key = normalizeName(name, "pseudo class");
-        return pseudoClasses.contains(key) || nativePseudoClass(key);
+        synchronized (pseudoClasses) {
+            return pseudoClasses.contains(key) || nativePseudoClass(key);
+        }
     }
 
     public void setPseudoClass(String name, boolean enabled) {
         String key = normalizeName(name, "pseudo class");
-        boolean changed = enabled ? pseudoClasses.add(key) : pseudoClasses.remove(key);
+        boolean changed;
+        synchronized (pseudoClasses) {
+            changed = enabled ? pseudoClasses.add(key) : pseudoClasses.remove(key);
+        }
         if (changed) markDirty(UiDomMutationType.ATTRIBUTE_CHANGED, ":" + key, enabled ? "false" : "true", enabled ? "true" : "false");
     }
 
     public Map<String, String> computedStyle() {
-        return Collections.unmodifiableMap(computedStyle);
+        synchronized (computedStyle) {
+            synchronized (animatedComputedStyle) {
+                LinkedHashMap<String, String> out = new LinkedHashMap<>(computedStyle);
+                out.putAll(animatedComputedStyle);
+                return Collections.unmodifiableMap(out);
+            }
+        }
+    }
+
+    public Map<String, String> baseComputedStyle() {
+        synchronized (computedStyle) {
+            return Collections.unmodifiableMap(new LinkedHashMap<>(computedStyle));
+        }
+    }
+
+    public Map<String, String> animatedComputedStyle() {
+        synchronized (animatedComputedStyle) {
+            return Collections.unmodifiableMap(new LinkedHashMap<>(animatedComputedStyle));
+        }
     }
 
     public String style(String property) {
@@ -124,22 +163,80 @@ public final class UiDomElement extends UiDomNode {
     }
 
     public String style(String property, String fallback) {
-        String value = computedStyle.get(normalizeStyleProperty(property));
-        return value == null ? fallback : value;
+        String key = normalizeStyleProperty(property);
+        synchronized (computedStyle) {
+            synchronized (animatedComputedStyle) {
+                String animated = animatedComputedStyle.get(key);
+                if (animated != null) return animated;
+                String value = computedStyle.get(key);
+                return value == null ? fallback : value;
+            }
+        }
     }
 
     public void setComputedStyle(String property, String value) {
         String key = normalizeStyleProperty(property);
         String next = trimToEmpty(value);
-        String old = computedStyle.put(key, next);
+        String old;
+        synchronized (computedStyle) {
+            old = computedStyle.put(key, next);
+        }
         if (Objects.equals(old, next)) return;
         markDirty(UiDomMutationType.STYLE_CHANGED, key, old, next);
     }
 
+    public boolean setInternalComputedStyle(String property, String value) {
+        String key = normalizeStyleProperty(property);
+        String next = trimToEmpty(value);
+        synchronized (computedStyle) {
+            String old = computedStyle.put(key, next);
+            return !Objects.equals(old, next);
+        }
+    }
+
+    public boolean setAnimatedComputedStyle(String property, String value) {
+        String key = normalizeStyleProperty(property);
+        String next = trimToEmpty(value);
+        synchronized (animatedComputedStyle) {
+            String old = animatedComputedStyle.put(key, next);
+            return !Objects.equals(old, next);
+        }
+    }
+
+    public boolean removeAnimatedComputedStyle(String property) {
+        String key = normalizeStyleProperty(property);
+        synchronized (animatedComputedStyle) {
+            return animatedComputedStyle.remove(key) != null;
+        }
+    }
+
+    public boolean replaceAnimatedComputedStyle(Map<String, String> style) {
+        LinkedHashMap<String, String> nextStyle = new LinkedHashMap<>();
+        if (style != null) {
+            style.forEach((property, value) -> nextStyle.put(normalizeStyleProperty(property), trimToEmpty(value)));
+        }
+        synchronized (animatedComputedStyle) {
+            if (animatedComputedStyle.equals(nextStyle)) return false;
+            animatedComputedStyle.clear();
+            animatedComputedStyle.putAll(nextStyle);
+            return true;
+        }
+    }
+
+    public boolean clearAnimatedComputedStyle() {
+        synchronized (animatedComputedStyle) {
+            if (animatedComputedStyle.isEmpty()) return false;
+            animatedComputedStyle.clear();
+            return true;
+        }
+    }
+
     public Map<String, String> pseudoComputedStyle(String pseudoElement) {
         String key = normalizePseudoElement(pseudoElement);
-        Map<String, String> style = pseudoComputedStyle.get(key);
-        return style == null ? Map.of() : Collections.unmodifiableMap(style);
+        synchronized (pseudoComputedStyle) {
+            Map<String, String> style = pseudoComputedStyle.get(key);
+            return style == null ? Map.of() : Collections.unmodifiableMap(new LinkedHashMap<>(style));
+        }
     }
 
     public String pseudoStyle(String pseudoElement, String property) {
@@ -148,28 +245,78 @@ public final class UiDomElement extends UiDomNode {
 
     public String pseudoStyle(String pseudoElement, String property, String fallback) {
         String pseudo = normalizePseudoElement(pseudoElement);
-        Map<String, String> style = pseudoComputedStyle.get(pseudo);
-        if (style == null) return fallback;
-        String value = style.get(normalizeStyleProperty(property));
-        return value == null ? fallback : value;
+        synchronized (pseudoComputedStyle) {
+            Map<String, String> style = pseudoComputedStyle.get(pseudo);
+            if (style == null) return fallback;
+            String value = style.get(normalizeStyleProperty(property));
+            return value == null ? fallback : value;
+        }
     }
 
     public void setPseudoComputedStyle(String pseudoElement, String property, String value) {
         String pseudo = normalizePseudoElement(pseudoElement);
         String key = normalizeStyleProperty(property);
         String next = trimToEmpty(value);
-        LinkedHashMap<String, String> style = pseudoComputedStyle.computeIfAbsent(pseudo, ignored -> new LinkedHashMap<>());
-        String old = style.put(key, next);
+        String old;
+        synchronized (pseudoComputedStyle) {
+            LinkedHashMap<String, String> style = pseudoComputedStyle.computeIfAbsent(pseudo, ignored -> new LinkedHashMap<>());
+            old = style.put(key, next);
+        }
         if (Objects.equals(old, next)) return;
         markDirty(UiDomMutationType.STYLE_CHANGED, "::" + pseudo + "." + key, old, next);
     }
 
     public void clearComputedStyle() {
-        boolean changed = !computedStyle.isEmpty() || !pseudoComputedStyle.isEmpty();
-        if (!changed) return;
-        computedStyle.clear();
-        pseudoComputedStyle.clear();
+        boolean changed;
+        synchronized (computedStyle) {
+            synchronized (animatedComputedStyle) {
+                synchronized (pseudoComputedStyle) {
+                    changed = !computedStyle.isEmpty() || !animatedComputedStyle.isEmpty() || !pseudoComputedStyle.isEmpty();
+                    if (!changed) return;
+                    computedStyle.clear();
+                    animatedComputedStyle.clear();
+                    pseudoComputedStyle.clear();
+                }
+            }
+        }
         markDirty(UiDomMutationType.STYLE_CHANGED, "*", "", "");
+    }
+
+
+    public UiCssStyleImpact replaceComputedStyle(Map<String, String> style, Map<String, Map<String, String>> pseudoStyle) {
+        LinkedHashMap<String, String> nextStyle = new LinkedHashMap<>();
+        if (style != null) {
+            style.forEach((property, value) -> nextStyle.put(normalizeStyleProperty(property), trimToEmpty(value)));
+        }
+        LinkedHashMap<String, LinkedHashMap<String, String>> nextPseudoStyle = new LinkedHashMap<>();
+        if (pseudoStyle != null) {
+            pseudoStyle.forEach((pseudoElement, values) -> {
+                LinkedHashMap<String, String> target = new LinkedHashMap<>();
+                if (values != null) {
+                    values.forEach((property, value) -> target.put(normalizeStyleProperty(property), trimToEmpty(value)));
+                }
+                if (!target.isEmpty()) nextPseudoStyle.put(normalizePseudoElement(pseudoElement), target);
+            });
+        }
+        UiCssStyleImpact impact = UiCssStyleImpact.NONE;
+        synchronized (computedStyle) {
+            synchronized (pseudoComputedStyle) {
+                if (computedStyle.equals(nextStyle) && pseudoComputedStyle.equals(nextPseudoStyle)) return UiCssStyleImpact.NONE;
+                for (Map.Entry<String, String> entry : nextStyle.entrySet()) {
+                    if (!Objects.equals(computedStyle.get(entry.getKey()), entry.getValue())) impact = impact.merge(UiCssStyleImpact.of(entry.getKey()));
+                }
+                for (String property : computedStyle.keySet()) {
+                    if (!nextStyle.containsKey(property)) impact = impact.merge(UiCssStyleImpact.of(property));
+                }
+                if (!pseudoComputedStyle.equals(nextPseudoStyle)) impact = impact.merge(UiCssStyleImpact.PAINT);
+                computedStyle.clear();
+                computedStyle.putAll(nextStyle);
+                pseudoComputedStyle.clear();
+                pseudoComputedStyle.putAll(nextPseudoStyle);
+            }
+        }
+        markDirty(UiDomMutationType.STYLE_CHANGED, "*", "", "");
+        return impact;
     }
 
     public boolean matches(UiDomSelector selector) {

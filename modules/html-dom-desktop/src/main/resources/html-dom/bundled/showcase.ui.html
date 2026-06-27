@@ -1,57 +1,55 @@
-<html data-mode="boot" data-screen="main-menu" id="fl-root" style="background-color: #ffffff;">
+<html id="fl-root" data-mode="boot" data-screen="main-menu">
     <head>
         <meta charset="utf-8">
         <title>
             FrozenLands
         </title>
     </head>
-    <body style="background-color: #ffffff;">
-        <div id="ui-root" class="ui-root" style="background-color: #ffffff;">
-            <div data-visible="true" id="screen-main-menu" style="display: block; background-color: #ffffff;" class="screen main-menu">
+    <body>
+        <div class="ui-root" id="ui-root">
+            <div id="screen-main-menu" style="display: block;" class="screen main-menu" data-visible="true">
                 <div class="menu-card">
                     <p class="kicker">
-                        TAKE SOME / FROZENLANDS
+                        TAKE SOME / FROZENLANDS
                     </p>
                     <p class="title">
                         FrozenLands
                     </p>
                     <p class="subtitle">
-                        HTML/CSS menu powered by HtmlDom.
+                        Northern expedition control shell.
                     </p>
-                    <p id="main-menu-status" class="status">
-                        Main menu is already open. Choose New Expedition or Continue.
+                    <div class="menu-separator">
+                    </div>
+                    <p class="status" id="main-menu-status">
+                        No saves. Start expedition.
                     </p>
                     <button data-action="game.new" id="btn-new-game" class="menu-button primary">
-                        New Expedition
+                        New Expedition
                     </button>
                     <button data-action="game.continue" id="btn-continue" class="menu-button" disabled="disabled" data-slot="">
                         Continue
                     </button>
                     <button data-action="game.refreshSaves" id="btn-refresh-saves" class="menu-button">
-                        Refresh Saves
+                        Refresh Saves
                     </button>
                     <button data-action="game.exitToDesktop" id="btn-exit" class="menu-button danger">
                         Exit
                     </button>
                     <div class="save-box">
-                        <p class="save-title">
+                        <p class="save-title" style="margin-left: 10;">
                             Saves
                         </p>
-                        <p id="save-count" class="save-count">
-                            No saves
+                        <p class="save-count" id="save-count" style="display: none;">
                         </p>
-                        <p id="load-status" class="status mini">
-                            Main menu is already open. Choose New Expedition or Continue.
-                        </p>
-                        <div id="save-list" class="save-list">
+                        <div class="save-list" id="save-list">
                             <p class="save-empty">
-                                No saved progress yet.
+                                No saved expeditions yet.
                             </p>
                         </div>
                     </div>
                 </div>
             </div>
-            <div data-visible="false" id="screen-hud" style="display: none;" class="screen hud">
+            <div id="screen-hud" style="display: none;" class="screen hud" data-visible="false">
                 <div class="hud-panel">
                     <p class="kicker">
                         FROZENLANDS
@@ -61,7 +59,7 @@
                     </p>
                 </div>
             </div>
-            <div data-visible="false" id="screen-pause" style="display: none;" class="screen pause">
+            <div id="screen-pause" style="display: none;" class="screen pause" data-visible="false">
                 <div class="menu-card pause-card">
                     <p class="kicker">
                         SYSTEM
@@ -69,8 +67,8 @@
                     <p class="title">
                         Paused
                     </p>
-                    <p id="pause-load-status" class="status">
-                        Main menu is already open. Choose New Expedition or Continue.
+                    <p class="status" id="pause-load-status">
+                        No saves. Start expedition.
                     </p>
                     <button data-action="game.resume" id="btn-resume" class="menu-button primary">
                         Resume
@@ -79,14 +77,14 @@
                         Save
                     </button>
                     <button data-action="ui.mainMenu" id="btn-main-menu" class="menu-button">
-                        Main Menu
+                        Main Menu
                     </button>
                     <button data-action="game.exitToDesktop" id="btn-pause-exit" class="menu-button danger">
                         Exit
                     </button>
-                    <div id="pause-save-list" class="save-list">
+                    <div class="save-list" id="pause-save-list">
                         <p class="save-empty">
-                            No saved progress yet.
+                            No saved expeditions yet.
                         </p>
                     </div>
                 </div>
