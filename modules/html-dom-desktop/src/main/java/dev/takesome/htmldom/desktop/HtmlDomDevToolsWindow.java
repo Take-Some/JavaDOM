@@ -11,6 +11,7 @@ import dev.takesome.htmldom.dom.UiDomTraversal;
 import dev.takesome.htmldom.markup.UiMarkupParser;
 
 import javax.swing.JDialog;
+import javax.swing.JFrame;
 import javax.swing.WindowConstants;
 import javax.swing.JPanel;
 import javax.swing.SwingUtilities;
@@ -50,7 +51,6 @@ import java.util.Map;
 
 /** Chrome-like Elements DOM viewer painted by HtmlDom itself: no Swing tables/tree sheet. */
 public final class HtmlDomDevToolsWindow {
-    private static final String DEVTOOLS_ALWAYS_ON_TOP_PROPERTY = "htmldom.devtools.alwaysOnTop";
     private static final Color BG = new Color(31, 32, 35);
     private static final Color PANEL = new Color(38, 39, 42);
     private static final Color CARD = new Color(43, 44, 48);
@@ -84,9 +84,10 @@ public final class HtmlDomDevToolsWindow {
     private static final int MENU_ROW_H = 32;
 
     private final HtmlDomSwingPanel inspected;
+    private final HtmlDomConfig config;
     private final Canvas canvas = new Canvas();
     private final Set<Integer> collapsedNodeIds = new HashSet<>();
-    private JDialog frame;
+    private Window frame;
     private float domScroll;
     private float rightScroll;
     private int selectedNodeId;
@@ -108,8 +109,9 @@ public final class HtmlDomDevToolsWindow {
     private final ArrayList<HtmlDomDevToolsNodeSnapshot.NodeCopy> redoStack = new ArrayList<>();
     private final ArrayList<DomRow> rows = new ArrayList<>();
 
-    public HtmlDomDevToolsWindow(HtmlDomSwingPanel inspected) {
+    public HtmlDomDevToolsWindow(HtmlDomSwingPanel inspected, HtmlDomConfig config) {
         this.inspected = inspected;
+        this.config = config == null ? HtmlDomConfig.defaults() : config;
     }
 
     public void open() {
@@ -129,7 +131,7 @@ public final class HtmlDomDevToolsWindow {
     }
 
     private void closeOnEdt() {
-        JDialog current = frame;
+        Window current = frame;
         frame = null;
         if (current == null) return;
         current.setAlwaysOnTop(false);
@@ -137,7 +139,15 @@ public final class HtmlDomDevToolsWindow {
         current.dispose();
     }
 
-    private JDialog createToolWindow() {
+    private Window createToolWindow() {
+        return switch (config.devToolsWindowType()) {
+            case STANDALONE_FRAME -> new JFrame("HtmlDom DevTools — Elements");
+            case OWNERLESS_DIALOG -> new JDialog((java.awt.Frame) null, "HtmlDom DevTools — Elements", false);
+            case OWNED_DIALOG -> createOwnedDialog();
+        };
+    }
+
+    private JDialog createOwnedDialog() {
         Window owner = SwingUtilities.getWindowAncestor(inspected);
         if (owner == null) {
             return new JDialog((java.awt.Frame) null, "HtmlDom DevTools — Elements", false);
@@ -145,18 +155,35 @@ public final class HtmlDomDevToolsWindow {
         return new JDialog(owner, "HtmlDom DevTools — Elements", Dialog.ModalityType.MODELESS);
     }
 
+
+    private void setToolContentPane(Window window) {
+        if (window instanceof JFrame jFrame) {
+            jFrame.setContentPane(canvas);
+        } else if (window instanceof JDialog dialog) {
+            dialog.setContentPane(canvas);
+        }
+    }
+
+    private void setToolCloseOperation(Window window) {
+        if (window instanceof JFrame jFrame) {
+            jFrame.setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
+        } else if (window instanceof JDialog dialog) {
+            dialog.setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
+        }
+    }
+
     private void openOnEdt() {
         if (frame == null || !frame.isDisplayable()) {
             frame = createToolWindow();
             frame.setName("HtmlDom DevTools");
             frame.setAutoRequestFocus(true);
-            frame.setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
+            setToolCloseOperation(frame);
             frame.addWindowListener(new WindowAdapter() {
                 @Override public void windowClosed(WindowEvent event) {
                     frame = null;
                 }
             });
-            frame.setContentPane(canvas);
+            setToolContentPane(frame);
             frame.setSize(1220, 780);
             frame.setMinimumSize(new Dimension(900, 560));
             frame.setLocationByPlatform(true);
@@ -171,11 +198,11 @@ public final class HtmlDomDevToolsWindow {
     }
 
     private boolean alwaysOnTop() {
-        return Boolean.parseBoolean(System.getProperty(DEVTOOLS_ALWAYS_ON_TOP_PROPERTY, "true"));
+        return config.devToolsZOrder().alwaysOnTop();
     }
 
     private void raiseDevToolsWindow() {
-        if (frame == null || !frame.isShowing()) return;
+        if (frame == null || !frame.isShowing() || !config.devToolsZOrder().bringToFrontOnOpen()) return;
         frame.toFront();
         frame.requestFocus();
         canvas.requestFocusInWindow();

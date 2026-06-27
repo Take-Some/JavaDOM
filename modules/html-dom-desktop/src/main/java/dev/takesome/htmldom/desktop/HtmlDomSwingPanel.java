@@ -26,7 +26,6 @@ import dev.takesome.htmldom.markup.UiMarkupParser;
 import dev.takesome.htmldom.scripting.lua.HtmlDomLuaRuntime;
 
 import javax.swing.JPanel;
-import javax.swing.SwingUtilities;
 import javax.swing.Timer;
 import java.awt.Stroke;
 import java.awt.FontMetrics;
@@ -43,13 +42,12 @@ import java.awt.RenderingHints;
 import java.awt.Shape;
 import java.awt.geom.RoundRectangle2D;
 import java.awt.Paint;
-import java.awt.Window;
 import java.util.List;
 
 /** Desktop Swing renderer for HtmlDom markup + CSS. No browser and no HTTP server. */
 public final class HtmlDomSwingPanel extends JPanel implements HtmlDomInputRouter.Host {
-    private static final String DEVTOOLS_PUSH_INSPECTED_BEHIND_PROPERTY = "htmldom.devtools.pushInspectedBehind";
     private static final HtmlDomLogger LOG = HtmlDomLog.logger(HtmlDomSwingPanel.class);
+    private final HtmlDomConfig config;
     private final UiDomDocument dom;
     private final UiStylesheet stylesheet;
     private final UiCssCascade cascade = new UiCssCascade();
@@ -79,23 +77,39 @@ public final class HtmlDomSwingPanel extends JPanel implements HtmlDomInputRoute
     private UiCssLayoutResult layout;
 
     public HtmlDomSwingPanel(String markup, String css) {
-        this(markup, css, "desktop.ui.html", "");
+        this(markup, css, "desktop.ui.html", "", HtmlDomConfig.defaults());
+    }
+
+    public HtmlDomSwingPanel(String markup, String css, HtmlDomConfig config) {
+        this(markup, css, "desktop.ui.html", "", config);
     }
 
     public HtmlDomSwingPanel(String markup, String css, String stylesheetBasePath) {
-        this(markup, css, "desktop.ui.html", stylesheetBasePath);
+        this(markup, css, "desktop.ui.html", stylesheetBasePath, HtmlDomConfig.defaults());
+    }
+
+    public HtmlDomSwingPanel(String markup, String css, String stylesheetBasePath, HtmlDomConfig config) {
+        this(markup, css, "desktop.ui.html", stylesheetBasePath, config);
     }
 
     public HtmlDomSwingPanel(String markup, String css, String sourcePath, String stylesheetBasePath) {
+        this(markup, css, sourcePath, stylesheetBasePath, HtmlDomConfig.defaults());
+    }
+
+    public HtmlDomSwingPanel(String markup, String css, String sourcePath, String stylesheetBasePath, HtmlDomConfig config) {
+        this.config = config == null ? HtmlDomConfig.defaults() : config;
         String safeMarkup = markup == null ? "" : markup;
         String safeCss = css == null ? "" : css;
         String resolvedSourcePath = normalizeSourcePath(sourcePath);
         LOG.info(
-                "HtmlDom panel bootstrap source='{}' markupChars={} explicitCssChars={} stylesheetBase='{}'",
+                "HtmlDom panel bootstrap source='{}' markupChars={} explicitCssChars={} stylesheetBase='{}' devTools={} windowType={} zOrder={}",
                 resolvedSourcePath,
                 safeMarkup.length(),
                 safeCss.length(),
-                stylesheetBasePath == null ? "" : stylesheetBasePath
+                stylesheetBasePath == null ? "" : stylesheetBasePath,
+                this.config.allowDevTools(),
+                this.config.devToolsWindowType(),
+                this.config.devToolsZOrder()
         );
         UiMarkupDocument document = new UiMarkupParser().parse(safeMarkup, resolvedSourcePath);
         this.dom = document.dom();
@@ -173,7 +187,9 @@ public final class HtmlDomSwingPanel extends JPanel implements HtmlDomInputRoute
     }
 
     @Override public void removeNotify() {
-        closeDevTools();
+        if (config.devToolsClosePolicy().closeWithHost()) {
+            closeDevTools();
+        }
         super.removeNotify();
     }
 
@@ -280,12 +296,12 @@ public final class HtmlDomSwingPanel extends JPanel implements HtmlDomInputRoute
     }
 
     @Override public void openDevTools() {
-        Window inspectedWindow = SwingUtilities.getWindowAncestor(this);
-        if (devToolsWindow == null) devToolsWindow = new HtmlDomDevToolsWindow(this);
-        devToolsWindow.open();
-        if (Boolean.getBoolean(DEVTOOLS_PUSH_INSPECTED_BEHIND_PROPERTY) && inspectedWindow != null) {
-            SwingUtilities.invokeLater(inspectedWindow::toBack);
+        if (!config.devToolsAllowed()) {
+            LOG.debug("HtmlDom DevTools open request ignored by config allowDevTools={}", config.allowDevTools());
+            return;
         }
+        if (devToolsWindow == null) devToolsWindow = new HtmlDomDevToolsWindow(this, config);
+        devToolsWindow.open();
     }
 
     @Override public ScrollDrag activeScrollDrag() {
