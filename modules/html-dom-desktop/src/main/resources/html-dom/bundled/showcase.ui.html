@@ -1,90 +1,96 @@
-<html>
-<head>
-    <title>Clean Gradient Demo</title>
-    <link rel="stylesheet" href="showcase.ui.css">
-</head>
-<body>
-<section class="page">
-    <section class="hero">
-        <section class="nav">
-            <section class="brand">
-                <span class="logo">
-                    <img src="north_star.svg" />
-                </span>
-                <section class="brand-text">
-                    <h3>Helix UI</h3>
-                    <p>Interactive desktop demo</p>
-                </section>
-            </section>
-            <section class="nav-links">
-                <span>Overview</span>
-                <span>Components</span>
-                <span>Runtime</span>
-            </section>
-        </section>
-
-        <section class="hero-body">
-            <section class="hero-copy">
-                <p class="eyebrow">GRADIENT SYSTEM · INTERACTIVE DEMO</p>
-                <h1>Simple interface page with working actions.</h1>
-                <p class="lead">A clean desktop-style layout for showcasing engine UI, cards, states and runtime hit testing without browser or WebView.</p>
-                <section class="actions">
-                    <button id="open-preview" class="button primary" data-action="pulse"><i class="fa-solid fa-play action-icon"></i> <span>Open preview</span></button>
-                    <button id="read-details" class="button secondary" data-action="dialog"><i class="fa-solid fa-circle-info action-icon"></i> <span>Read details</span></button>
-                </section>
-            </section>
-
-            <section class="hero-card">
-                <span class="orb one"></span>
-                <span class="orb two"></span>
-                <h2>UI Surface</h2>
-                <p>Rendered as a compact interactive scene.</p>
-                <section class="meter">
-                    <span class="meter-fill"></span>
-                </section>
-            </section>
-        </section>
-    </section>
-
-    <section class="content">
-        <section class="feature-card blue">
-            <span class="icon fa-solid fa-table"></span>
-            <h3>Layout</h3>
-            <p>Stable rows, clean spacing and readable surfaces.</p>
-        </section>
-        <section class="feature-card violet">
-            <span class="icon fa-solid fa-code"></span>
-            <h3>Styling</h3>
-            <p>Soft gradients, subtle borders and dark glass panels.</p>
-        </section>
-        <section class="feature-card cyan">
-            <span class="icon fa-solid fa-bolt"></span>
-            <h3>Runtime</h3>
-            <p>Buttons now have real DOM actions and hit targets.</p>
-        </section>
-    </section>
-
-    <section class="bottom-row">
-        <section class="panel status-panel">
-            <p class="eyebrow">SYSTEM STATUS</p>
-            <h2>Everything visible by default.</h2>
-            <section class="status-list">
-                <span class="status ok">DOM parsed</span>
-                <span class="status blue">CSS loaded</span>
-                <span class="status violet">Actions ready</span>
-            </section>
-        </section>
-        <section class="panel note-panel">
-            <p class="eyebrow">DESIGN NOTE</p>
-            <h2>Clean gradients, no clutter.</h2>
-            <p>Focused page structure with a hero section, three feature cards and a compact status area.</p>
-        </section>
-    </section>
-</section>
-
-<section id="showcase-dialog" class="dialog">
-    <button id="close-dialog" class="button" data-action="close-dialog"><i class="fa-solid fa-xmark action-icon"></i> <span>Close</span></button>
-</section>
-<section id="toast" class="toast">Ready</section>
-</body>
+<html data-mode="boot" data-screen="main-menu" id="fl-root" style="background-color: #ffffff;">
+    <head>
+        <meta charset="utf-8">
+        <title>
+            FrozenLands
+        </title>
+    </head>
+    <body style="background-color: #ffffff;">
+        <div id="ui-root" class="ui-root" style="background-color: #ffffff;">
+            <div data-visible="true" id="screen-main-menu" style="display: block; background-color: #ffffff;" class="screen main-menu">
+                <div class="menu-card">
+                    <p class="kicker">
+                        TAKE SOME / FROZENLANDS
+                    </p>
+                    <p class="title">
+                        FrozenLands
+                    </p>
+                    <p class="subtitle">
+                        HTML/CSS menu powered by HtmlDom.
+                    </p>
+                    <p id="main-menu-status" class="status">
+                        Main menu is already open. Choose New Expedition or Continue.
+                    </p>
+                    <button data-action="game.new" id="btn-new-game" class="menu-button primary">
+                        New Expedition
+                    </button>
+                    <button data-action="game.continue" id="btn-continue" class="menu-button" disabled="disabled" data-slot="">
+                        Continue
+                    </button>
+                    <button data-action="game.refreshSaves" id="btn-refresh-saves" class="menu-button">
+                        Refresh Saves
+                    </button>
+                    <button data-action="game.exitToDesktop" id="btn-exit" class="menu-button danger">
+                        Exit
+                    </button>
+                    <div class="save-box">
+                        <p class="save-title">
+                            Saves
+                        </p>
+                        <p id="save-count" class="save-count">
+                            No saves
+                        </p>
+                        <p id="load-status" class="status mini">
+                            Main menu is already open. Choose New Expedition or Continue.
+                        </p>
+                        <div id="save-list" class="save-list">
+                            <p class="save-empty">
+                                No saved progress yet.
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div data-visible="false" id="screen-hud" style="display: none;" class="screen hud">
+                <div class="hud-panel">
+                    <p class="kicker">
+                        FROZENLANDS
+                    </p>
+                    <p class="hud-text">
+                        HUD active. Press F10 or ESC for pause.
+                    </p>
+                </div>
+            </div>
+            <div data-visible="false" id="screen-pause" style="display: none;" class="screen pause">
+                <div class="menu-card pause-card">
+                    <p class="kicker">
+                        SYSTEM
+                    </p>
+                    <p class="title">
+                        Paused
+                    </p>
+                    <p id="pause-load-status" class="status">
+                        Main menu is already open. Choose New Expedition or Continue.
+                    </p>
+                    <button data-action="game.resume" id="btn-resume" class="menu-button primary">
+                        Resume
+                    </button>
+                    <button data-action="game.save" id="btn-save" class="menu-button">
+                        Save
+                    </button>
+                    <button data-action="ui.mainMenu" id="btn-main-menu" class="menu-button">
+                        Main Menu
+                    </button>
+                    <button data-action="game.exitToDesktop" id="btn-pause-exit" class="menu-button danger">
+                        Exit
+                    </button>
+                    <div id="pause-save-list" class="save-list">
+                        <p class="save-empty">
+                            No saved progress yet.
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </body>
 </html>

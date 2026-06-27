@@ -47,7 +47,7 @@ tasks.named('jar') {
 
 tasks.register('bundledHtmlUiJar', Jar) {
     group = 'distribution'
-    description = 'Builds executable desktop JFrame HtmlDom showcase jar.'
+    description = 'Builds executable desktop HtmlDom showcase jar.'
     archiveBaseName.set('html-dom-ui')
     archiveClassifier.set('bundled')
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
@@ -103,4 +103,32 @@ publishing {
             }
         }
     }
+}
+
+
+tasks.register('validateNoJFrameUsage') {
+    group = 'verification'
+    description = 'Rejects JFrame usage in html-dom-desktop production Java sources.'
+
+    doLast {
+        def denied = ['JFrame', 'javax.swing.JFrame', 'new JFrame']
+        def violations = []
+        fileTree('src/main/java') {
+            include '**/*.java'
+        }.each { sourceFile ->
+            def text = sourceFile.getText('UTF-8')
+            denied.each { token ->
+                if (text.contains(token)) {
+                    violations << "${sourceFile.path} contains denied token: ${token}"
+                }
+            }
+        }
+        if (!violations.isEmpty()) {
+            throw new GradleException('JFrame usage is not allowed in html-dom-desktop production sources:\n' + violations.join('\n'))
+        }
+    }
+}
+
+tasks.named('check') {
+    dependsOn 'validateNoJFrameUsage'
 }

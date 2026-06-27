@@ -6,6 +6,7 @@ import dev.takesome.htmldom.dom.UiDomTraversal;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 
 /** Runtime focus model and focus pseudo-class projection. */
 public final class HtmlDomFocusController {
@@ -16,7 +17,7 @@ public final class HtmlDomFocusController {
     }
 
     public boolean focusable(UiDomElement element) {
-        if (element == null || skip(element)) return false;
+        if (element == null || skip(element) || element.hasAttribute("disabled")) return false;
         String tabindex = element.attribute("tabindex", "").trim();
         if ("-1".equals(tabindex)) return false;
         if (!tabindex.isBlank()) return true;
@@ -36,11 +37,51 @@ public final class HtmlDomFocusController {
 
     public List<UiDomElement> focusableElements(UiDomDocument document) {
         ArrayList<UiDomElement> out = new ArrayList<>();
-        if (document == null) return out;
+        if (document == null || document.rootOptional().isEmpty()) return out;
         for (UiDomElement element : UiDomTraversal.depthFirstElements(document.documentElement())) {
             if (focusable(element)) out.add(element);
         }
         return out;
+    }
+
+    /**
+     * Returns the nearest owning {@code <form>} for an element, matching the
+     * practical HtmlDom form model: forms are local input-navigation groups,
+     * not browser/network submission boundaries.
+     */
+    public UiDomElement formOwner(UiDomElement element) {
+        UiDomElement current = element;
+        while (current != null) {
+            if ("form".equals(current.tagName())) return current;
+            current = current.parent();
+        }
+        return null;
+    }
+
+    public List<UiDomElement> formControls(UiDomElement form) {
+        ArrayList<UiDomElement> out = new ArrayList<>();
+        if (form == null || !"form".equals(form.tagName())) return out;
+        for (UiDomElement element : UiDomTraversal.depthFirstElements(form)) {
+            if (element == form) continue;
+            UiDomElement owner = formOwner(element);
+            if (owner != form) continue;
+            if (formNavigable(element)) out.add(element);
+        }
+        return out;
+    }
+
+    public UiDomElement focusNextInForm(boolean forward) {
+        UiDomElement form = formOwner(focusedElement);
+        if (form == null) return null;
+        List<UiDomElement> controls = formControls(form);
+        if (controls.size() < 2) return null;
+        int current = controls.indexOf(focusedElement);
+        if (current < 0) return forward ? controls.get(0) : controls.get(controls.size() - 1);
+        int next = forward ? current + 1 : current - 1;
+        if (next < 0) next = controls.size() - 1;
+        if (next >= controls.size()) next = 0;
+        UiDomElement candidate = controls.get(next);
+        return candidate == focusedElement ? null : candidate;
     }
 
     public void setFocusedElement(UiDomElement element) {
@@ -77,6 +118,17 @@ public final class HtmlDomFocusController {
             current.setPseudoClass("focus-within", true);
             current = current.parent();
         }
+    }
+
+    private boolean formNavigable(UiDomElement element) {
+        if (!focusable(element)) return false;
+        if (element.hasAttribute("tabindex")) return true;
+        return standardFormControl(element.tagName());
+    }
+
+    private boolean standardFormControl(String tag) {
+        String normalized = tag == null ? "" : tag.trim().toLowerCase(Locale.ROOT);
+        return normalized.equals("button") || normalized.equals("input") || normalized.equals("select") || normalized.equals("textarea");
     }
 
     private boolean skip(UiDomElement element) {

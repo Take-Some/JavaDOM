@@ -3,7 +3,7 @@ plugins {
 }
 
 group = 'dev.takesome'
-version = '1.0.12'
+version = '1.0.15'
 
 ext {
     luajVersion = '3.0.1'
@@ -89,13 +89,13 @@ subprojects {
 
 tasks.register('bundledHtmlUiJar') {
     group = 'distribution'
-    description = 'Builds executable desktop JFrame HtmlDom showcase jar.'
+    description = 'Builds executable desktop HtmlDom showcase jar.'
     dependsOn ':html-dom-desktop:bundledHtmlUiJar'
 }
 
 tasks.register('runBundledHtmlUi') {
     group = 'application'
-    description = 'Runs the desktop JFrame HtmlDom showcase launcher.'
+    description = 'Runs the desktop HtmlDom showcase launcher.'
     dependsOn ':html-dom-desktop:run'
 }
 

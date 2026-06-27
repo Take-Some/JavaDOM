@@ -4,15 +4,18 @@ import dev.takesome.htmldom.desktop.HtmlDomSwingPanel;
 import dev.takesome.htmldom.logging.HtmlDomLog;
 import dev.takesome.htmldom.logging.HtmlDomLogger;
 
-import javax.swing.JFrame;
+import javax.swing.JDialog;
+import javax.swing.WindowConstants;
 import javax.swing.SwingUtilities;
 import java.awt.Dimension;
 import java.awt.GraphicsEnvironment;
+import java.awt.event.WindowAdapter;
+import java.awt.event.WindowEvent;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 
-/** Starts the bundled HtmlDom desktop showcase in a JFrame. */
+/** Starts the bundled HtmlDom desktop showcase in an ownerless desktop dialog. */
 public final class BundledHtmlUi {
     private static final String ROOT = "html-dom/bundled/";
     private static final HtmlDomLogger LOG = HtmlDomLog.logger(BundledHtmlUi.class);
@@ -27,13 +30,19 @@ public final class BundledHtmlUi {
             return;
         }
         SwingUtilities.invokeLater(() -> {
-            JFrame frame = new JFrame("HtmlDom Desktop HTML-like UI");
-            frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
-            frame.setContentPane(new HtmlDomSwingPanel(markup, "", ROOT + "showcase.ui.html", ROOT));
-            frame.setMinimumSize(new Dimension(1080, 720));
-            frame.setSize(1280, 860);
-            frame.setLocationRelativeTo(null);
-            frame.setVisible(true);
+            JDialog window = new JDialog((java.awt.Frame) null, "HtmlDom Desktop HTML-like UI", false);
+            window.setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
+            window.addWindowListener(new WindowAdapter() {
+                @Override
+                public void windowClosed(WindowEvent event) {
+                    System.exit(0);
+                }
+            });
+            window.setContentPane(new HtmlDomSwingPanel(markup, "", ROOT + "showcase.ui.html", ROOT));
+            window.setMinimumSize(new Dimension(1080, 720));
+            window.setSize(1280, 860);
+            window.setLocationRelativeTo(null);
+            window.setVisible(true);
         });
     }
 

@@ -24,11 +24,6 @@
             <AppenderRef ref="File"/>
         </Logger>
 
-        <Logger name="dev.takesome.helix" level="${HtmlDomLogLevel}" additivity="false">
-            <AppenderRef ref="Console"/>
-            <AppenderRef ref="File"/>
-        </Logger>
-
         <Logger name="org.apache.logging" level="${ExternalLogLevel}"/>
 
         <Root level="warn">

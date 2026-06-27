@@ -215,7 +215,22 @@ public final class HtmlDomInputRouter {
                 return;
             }
         }
+        if (!event.isAltDown() && !event.isControlDown() && !event.isMetaDown() && formArrowNavigation(code)) {
+            event.consume();
+            return;
+        }
         if (keyboardScroll(code)) event.consume();
+    }
+
+    private boolean formArrowNavigation(int code) {
+        boolean forward;
+        if (code == KeyEvent.VK_DOWN || code == KeyEvent.VK_RIGHT) forward = true;
+        else if (code == KeyEvent.VK_UP || code == KeyEvent.VK_LEFT) forward = false;
+        else return false;
+        UiDomElement next = host.focusController().focusNextInForm(forward);
+        if (next == null) return false;
+        setFocusedElement(next, true);
+        return true;
     }
 
     private boolean keyboardScroll(int code) {
