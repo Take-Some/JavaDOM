@@ -60,4 +60,33 @@ final class UiCssInlineWhitespaceLayoutTest {
         assertTrue(layout.inlineBoxes(section).stream().anyMatch(run -> "HELLO".equals(run.text())));
         assertEquals("Hello", layout.lineBoxes(section).get(0).text());
     }
+
+    @Test
+    void inlinePaddingCreatesAtomicInlineBoxWithBoxMetrics() {
+        UiMarkupDocument markup = new UiMarkupParser().parse(
+                "<html><body><section class=\"copy\"><span class=\"icon\">x</span>Profile</section></body></html>",
+                "inline-padding.html"
+        );
+        UiStylesheet stylesheet = UiCssUserAgentStylesheet.stylesheet().plus(new UiCssParser().parse("""
+                .copy {
+                    width: 300px;
+                    height: fit-content;
+                    font-size: 16px;
+                }
+                .icon {
+                    padding: 5px;
+                    font-size: 10px;
+                }
+                """));
+        new UiCssCascade().apply(markup.dom(), stylesheet);
+        var layout = new UiCssLayoutEngine().layout(markup.dom(), 640, 480);
+        var section = markup.dom().querySelector("section.copy").orElseThrow();
+        var runs = layout.inlineBoxes(section);
+
+        assertTrue(runs.size() >= 2, "icon and text should become separate inline runs");
+        var padded = runs.stream().filter(UiCssInlineBox::replaced).findFirst().orElseThrow();
+        assertTrue(padded.width() >= 11f, "horizontal padding must contribute to inline box width");
+        assertTrue(padded.height() >= 20f, "vertical padding must contribute to inline box height");
+    }
+
 }

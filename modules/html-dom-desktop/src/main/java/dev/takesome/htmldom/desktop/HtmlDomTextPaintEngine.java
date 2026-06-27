@@ -54,7 +54,7 @@ public final class HtmlDomTextPaintEngine {
             int size = Math.max(8, Math.round(context.paint().length(styleElement.style("font-size", "15px"), Math.max(8f, run.height() * 0.8f))));
             if (run.replaced()) {
                 String glyph = FontAwesomeIcons.glyph(styleElement.classList().values());
-                if (glyph.isBlank() && inlineBlock(styleElement)) {
+                if (glyph.isBlank() && inlineBoxLike(styleElement)) {
                     paintInlineBlockRun(g, styleElement, run, context);
                     continue;
                 }
@@ -170,12 +170,19 @@ public final class HtmlDomTextPaintEngine {
     private void paintInlineBlockRun(Graphics2D g, UiDomElement element, UiCssInlineBox run, Context context) {
         int x = Math.round(run.x());
         int y = Math.round(context.viewportHeight() - run.y() - run.height());
-        Rectangle r = new Rectangle(x, y, Math.round(run.width()), Math.round(run.height()));
+        Rectangle outer = new Rectangle(x, y, Math.round(run.width()), Math.round(run.height()));
+        CssInsets margin = cssInsets(element, "margin", context.paint());
+        Rectangle r = new Rectangle(
+                outer.x + margin.left,
+                outer.y + margin.top,
+                Math.max(0, outer.width - margin.left - margin.right),
+                Math.max(0, outer.height - margin.top - margin.bottom)
+        );
         context.paint().paintBackground(g, element, r);
         context.paint().paintBorder(g, element, r);
         String text = directText(element);
         if (!text.isBlank()) {
-            int size = Math.max(8, Math.round(context.paint().length(element.style("font-size", "13px"), Math.max(8f, run.height() * 0.6f))));
+            int size = Math.max(8, Math.round(context.paint().length(element.style("font-size", "13px"), Math.max(8f, r.height * 0.6f))));
             centerText(g, text, r, size, fontStyle(element), context.paint().color(element.style("color", ""), inheritedColor(element, context)), fontFor(element, size, fontStyle(element)));
         }
         context.paint().paintOutline(g, element, r, element == context.focusedElement());
@@ -205,8 +212,62 @@ public final class HtmlDomTextPaintEngine {
         return weight.equals("bold") || weight.equals("700") || weight.equals("800") || weight.equals("900");
     }
 
+    private boolean inlineBoxLike(UiDomElement element) {
+        return inlineBlock(element) || inlineBoxMetrics(element);
+    }
+
     private boolean inlineBlock(UiDomElement element) {
         return element != null && "inline-block".equals(element.style("display", "").trim().toLowerCase(Locale.ROOT));
+    }
+
+    private boolean inlineBoxMetrics(UiDomElement element) {
+        if (element == null) return false;
+        return meaningfulBoxValue(firstNonBlank(element.style("width", ""), element.style("height", "")))
+                || meaningfulBoxValue(firstNonBlank(element.style("padding", ""), element.style("padding-left", ""), element.style("padding-right", ""), element.style("padding-top", ""), element.style("padding-bottom", "")))
+                || meaningfulBoxValue(firstNonBlank(element.style("margin", ""), element.style("margin-left", ""), element.style("margin-right", ""), element.style("margin-top", ""), element.style("margin-bottom", "")))
+                || meaningfulBoxValue(firstNonBlank(element.style("border", ""), element.style("border-width", ""), element.style("border-color", "")));
+    }
+
+    private boolean meaningfulBoxValue(String raw) {
+        if (raw == null) return false;
+        String value = raw.trim().toLowerCase(Locale.ROOT);
+        if (value.isBlank()
+                || value.equals("auto")
+                || value.equals("none")
+                || value.equals("normal")
+                || value.equals("transparent")
+                || value.equals("initial")
+                || value.equals("inherit")
+                || value.equals("unset")) return false;
+        for (String token : value.split("\s+")) {
+            String part = token.trim();
+            if (part.isBlank() || part.equals("none") || part.equals("solid") || part.equals("transparent")) continue;
+            try {
+                String numeric = part.replaceAll("[a-z%]+$", "");
+                if (numeric.isBlank() || numeric.equals("+") || numeric.equals("-")) continue;
+                if (Math.abs(Float.parseFloat(numeric)) > 0.0001f) return true;
+            } catch (RuntimeException ignored) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private CssInsets cssInsets(UiDomElement element, String property, HtmlDomPaintEngine paint) {
+        int all = Math.round(paint.length(element.style(property, ""), 0f));
+        int left = Math.round(paint.length(element.style(property + "-left", ""), all));
+        int right = Math.round(paint.length(element.style(property + "-right", ""), all));
+        int top = Math.round(paint.length(element.style(property + "-top", ""), all));
+        int bottom = Math.round(paint.length(element.style(property + "-bottom", ""), all));
+        return new CssInsets(Math.max(0, left), Math.max(0, top), Math.max(0, right), Math.max(0, bottom));
+    }
+
+    private String firstNonBlank(String... values) {
+        if (values == null) return "";
+        for (String value : values) {
+            if (value != null && !value.isBlank()) return value;
+        }
+        return "";
     }
 
     private UiDomElement elementByNodeId(UiDomDocument document, int nodeId) {
@@ -216,6 +277,8 @@ public final class HtmlDomTextPaintEngine {
         }
         return null;
     }
+
+    private record CssInsets(int left, int top, int right, int bottom) { }
 
     public record Context(
             UiDomDocument document,

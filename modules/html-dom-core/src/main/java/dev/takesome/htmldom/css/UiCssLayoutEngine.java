@@ -841,19 +841,66 @@ public final class UiCssLayoutEngine {
     private boolean inlineParticipant(UiDomElement element) {
         String displayValue = firstStyle(element, "display").toLowerCase(Locale.ROOT);
         if (displayValue.equals("inline") || displayValue.equals("inline-block")) return true;
-        if (atomicInline(element)) return true;
+        if (replacedInline(element)) return true;
+        return inlineTag(element);
+    }
+
+    private boolean atomicInline(UiDomElement element) {
+        return inlineBlock(element) || replacedInline(element) || (inlineLevel(element) && inlineBoxMetrics(element));
+    }
+
+    private boolean inlineLevel(UiDomElement element) {
+        String displayValue = firstStyle(element, "display").toLowerCase(Locale.ROOT);
+        return displayValue.equals("inline") || displayValue.equals("inline-block") || inlineTag(element);
+    }
+
+    private boolean inlineTag(UiDomElement element) {
+        if (element == null) return false;
         return switch (element.tagName()) {
             case "a", "abbr", "b", "bdi", "bdo", "br", "cite", "code", "data", "dfn", "em", "i", "kbd", "label", "mark", "q", "s", "samp", "small", "span", "strong", "sub", "sup", "time", "u", "var" -> true;
             default -> false;
         };
     }
 
-    private boolean atomicInline(UiDomElement element) {
-        return inlineBlock(element) || replacedInline(element);
-    }
-
     private boolean inlineBlock(UiDomElement element) {
         return "inline-block".equals(firstStyle(element, "display").toLowerCase(Locale.ROOT));
+    }
+
+    private boolean inlineBoxMetrics(UiDomElement element) {
+        if (element == null) return false;
+        return meaningfulBoxValue(width.raw(element))
+                || meaningfulBoxValue(height.raw(element))
+                || meaningfulBoxValue(firstStyle(element, "padding", "padding-left", "padding-right", "padding-top", "padding-bottom"))
+                || meaningfulBoxValue(firstStyle(element, "margin", "margin-left", "margin-right", "margin-top", "margin-bottom"))
+                || meaningfulBoxValue(firstStyle(element, "border", "border-width", "border-color", "border-style"));
+    }
+
+    private boolean meaningfulBoxValue(String raw) {
+        if (raw == null) return false;
+        String value = raw.trim().toLowerCase(Locale.ROOT);
+        if (value.isBlank()
+                || value.equals("auto")
+                || value.equals("none")
+                || value.equals("normal")
+                || value.equals("transparent")
+                || value.equals("initial")
+                || value.equals("inherit")
+                || value.equals("unset")) return false;
+        boolean sawNumeric = false;
+        for (String token : value.split("\s+")) {
+            String part = token.trim();
+            if (part.isBlank() || part.equals("none") || part.equals("solid") || part.equals("transparent")) continue;
+            try {
+                String numeric = part.replaceAll("[a-z%]+$", "");
+                if (numeric.isBlank() || numeric.equals("+" ) || numeric.equals("-")) continue;
+                float parsed = Float.parseFloat(numeric);
+                sawNumeric = true;
+                if (Math.abs(parsed) > 0.0001f) return true;
+            } catch (RuntimeException ignored) {
+                return true;
+            }
+        }
+        return false && sawNumeric;
     }
 
     private boolean replacedInline(UiDomElement element) {
@@ -867,22 +914,47 @@ public final class UiCssLayoutEngine {
     }
 
     private float atomicInlineWidth(UiDomElement element, float fontSize) {
+        UiCssBox reference = inlineBoxReference(fontSize, lineHeight(element, fontSize));
+        Insets p = padding(element, reference);
+        Insets m = margin(element, reference);
         String raw = width.raw(element);
-        if (!raw.isBlank() && !intrinsicWidthRequested(element, raw)) {
-            try { return Math.max(1f, UiCssLength.parse(raw).resolve(lengthContext, 1f, fontSize)); }
-            catch (RuntimeException ignored) { }
+        boolean explicit = !raw.isBlank() && !intrinsicWidthRequested(element, raw);
+        float contentWidth;
+        if (explicit) {
+            try { contentWidth = Math.max(1f, UiCssLength.parse(raw).resolve(lengthContext, reference.width(), fontSize)); }
+            catch (RuntimeException ignored) { contentWidth = Math.max(1f, fontSize); }
+        } else if (replacedInline(element) && !inlineBlock(element) && !inlineBoxMetrics(element)) {
+            contentWidth = Math.max(1f, fontSize * 1.12f);
+        } else {
+            contentWidth = Math.max(1f, Math.max(maxContentTextWidth(element), intrinsicChildrenWidth(element, Math.max(1f, fontSize * 12f))));
         }
-        if (replacedInline(element) && !inlineBlock(element)) return Math.max(1f, fontSize * 1.12f);
-        return Math.max(1f, Math.max(maxContentTextWidth(element), intrinsicChildrenWidth(element, Math.max(1f, fontSize * 12f))));
+        float borderBoxWidth = explicit && !"content-box".equals(boxSizing.read(element))
+                ? contentWidth
+                : contentWidth + p.left + p.right;
+        return Math.max(1f, borderBoxWidth + m.left + m.right);
     }
 
     private float atomicInlineHeight(UiDomElement element, float fontSize, float fallbackLineHeight) {
+        UiCssBox reference = inlineBoxReference(fontSize, fallbackLineHeight);
+        Insets p = padding(element, reference);
+        Insets m = margin(element, reference);
         String raw = height.raw(element);
-        if (!raw.isBlank() && !intrinsicHeightRequested(raw)) {
-            try { return Math.max(1f, UiCssLength.parse(raw).resolve(lengthContext, fallbackLineHeight, fallbackLineHeight)); }
-            catch (RuntimeException ignored) { }
+        boolean explicit = !raw.isBlank() && !intrinsicHeightRequested(raw);
+        float contentHeight;
+        if (explicit) {
+            try { contentHeight = Math.max(1f, UiCssLength.parse(raw).resolve(lengthContext, reference.height(), fallbackLineHeight)); }
+            catch (RuntimeException ignored) { contentHeight = Math.max(1f, fallbackLineHeight); }
+        } else {
+            contentHeight = Math.max(1f, fallbackLineHeight);
         }
-        return Math.max(1f, fallbackLineHeight);
+        float borderBoxHeight = explicit && !"content-box".equals(boxSizing.read(element))
+                ? contentHeight
+                : contentHeight + p.top + p.bottom;
+        return Math.max(1f, borderBoxHeight + m.top + m.bottom);
+    }
+
+    private UiCssBox inlineBoxReference(float fontSize, float lineHeight) {
+        return new UiCssBox(0f, 0f, Math.max(1f, fontSize * 12f), Math.max(1f, lineHeight));
     }
 
     private float atomicBaseline(UiDomElement element, float height) {
