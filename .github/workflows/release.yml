@@ -42,7 +42,7 @@ jobs:
             modules/**/build/libs/*.jar
 
       - name: Create GitHub release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           name: HtmlDom ${{ github.ref_name }} — CSS Length Tolerance Hotfix
           body_path: RELEASE_NOTES.md
