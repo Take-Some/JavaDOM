@@ -10,13 +10,14 @@ import dev.takesome.htmldom.dom.UiDomText;
 import dev.takesome.htmldom.dom.UiDomTraversal;
 import dev.takesome.htmldom.markup.UiMarkupParser;
 
-import javax.swing.JFrame;
+import javax.swing.JDialog;
 import javax.swing.WindowConstants;
 import javax.swing.JPanel;
 import javax.swing.SwingUtilities;
 import java.awt.BasicStroke;
 import java.awt.Color;
 import java.awt.Cursor;
+import java.awt.Dialog;
 import java.awt.Dimension;
 import java.awt.Font;
 import java.awt.FontMetrics;
@@ -25,6 +26,7 @@ import java.awt.Graphics2D;
 import java.awt.Rectangle;
 import java.awt.RenderingHints;
 import java.awt.Shape;
+import java.awt.Window;
 import java.awt.Point;
 import java.awt.Composite;
 import java.awt.AlphaComposite;
@@ -33,6 +35,8 @@ import java.awt.event.MouseEvent;
 import java.awt.event.MouseWheelEvent;
 import java.awt.event.KeyEvent;
 import java.awt.event.KeyAdapter;
+import java.awt.event.WindowAdapter;
+import java.awt.event.WindowEvent;
 import java.nio.file.Paths;
 import java.nio.file.Path;
 import java.nio.file.Files;
@@ -82,7 +86,7 @@ public final class HtmlDomDevToolsWindow {
     private final HtmlDomSwingPanel inspected;
     private final Canvas canvas = new Canvas();
     private final Set<Integer> collapsedNodeIds = new HashSet<>();
-    private JFrame frame;
+    private JDialog frame;
     private float domScroll;
     private float rightScroll;
     private int selectedNodeId;
@@ -125,7 +129,7 @@ public final class HtmlDomDevToolsWindow {
     }
 
     private void closeOnEdt() {
-        JFrame current = frame;
+        JDialog current = frame;
         frame = null;
         if (current == null) return;
         current.setAlwaysOnTop(false);
@@ -133,12 +137,25 @@ public final class HtmlDomDevToolsWindow {
         current.dispose();
     }
 
+    private JDialog createToolWindow() {
+        Window owner = SwingUtilities.getWindowAncestor(inspected);
+        if (owner == null) {
+            return new JDialog((java.awt.Frame) null, "HtmlDom DevTools — Elements", false);
+        }
+        return new JDialog(owner, "HtmlDom DevTools — Elements", Dialog.ModalityType.MODELESS);
+    }
+
     private void openOnEdt() {
         if (frame == null || !frame.isDisplayable()) {
-            frame = new JFrame("HtmlDom DevTools — Elements");
+            frame = createToolWindow();
             frame.setName("HtmlDom DevTools");
             frame.setAutoRequestFocus(true);
             frame.setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
+            frame.addWindowListener(new WindowAdapter() {
+                @Override public void windowClosed(WindowEvent event) {
+                    frame = null;
+                }
+            });
             frame.setContentPane(canvas);
             frame.setSize(1220, 780);
             frame.setMinimumSize(new Dimension(900, 560));
@@ -154,7 +171,7 @@ public final class HtmlDomDevToolsWindow {
     }
 
     private boolean alwaysOnTop() {
-        return Boolean.parseBoolean(System.getProperty(DEVTOOLS_ALWAYS_ON_TOP_PROPERTY, "false"));
+        return Boolean.parseBoolean(System.getProperty(DEVTOOLS_ALWAYS_ON_TOP_PROPERTY, "true"));
     }
 
     private void raiseDevToolsWindow() {
