@@ -7,26 +7,25 @@ import dev.takesome.htmldom.dom.UiDomTraversal;
 import java.awt.BasicStroke;
 import java.awt.Color;
 import java.awt.Graphics2D;
-import java.awt.Image;
 import java.awt.image.BufferedImage;
 import java.awt.Rectangle;
 import java.awt.Shape;
 import java.awt.geom.RoundRectangle2D;
-import java.io.IOException;
-import java.io.InputStream;
-import java.net.URI;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Locale;
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
-import javax.imageio.ImageIO;
 
 /** Paint phases for the desktop Java2D renderer. */
 public final class HtmlDomPaintEngine {
-    private static final Map<String, BufferedImage> BACKGROUND_IMAGE_CACHE = new ConcurrentHashMap<>();
+    private final HtmlDomImageLoader imageLoader;
     private boolean paintingFixedLayer;
+
+    public HtmlDomPaintEngine() {
+        this(HtmlDomPaintEngine.class.getClassLoader(), "");
+    }
+
+    public HtmlDomPaintEngine(ClassLoader classLoader, String... basePaths) {
+        this.imageLoader = new HtmlDomImageLoader(classLoader, basePaths);
+    }
 
     public boolean paintingFixedLayer() {
         return paintingFixedLayer;
@@ -96,6 +95,20 @@ public final class HtmlDomPaintEngine {
         g.setColor(outline);
         g.setStroke(new BasicStroke(Math.max(1f, outlineWidth)));
         g.draw(new RoundRectangle2D.Float(r.x - grow, r.y - grow, r.width + grow * 2f - 1f, r.height + grow * 2f - 1f, radius + grow, radius + grow));
+    }
+
+    public boolean paintImage(Graphics2D g, UiDomElement element, Rectangle r) {
+        String source = element == null ? "" : firstNonBlank(
+                element.attribute("src", ""),
+                element.attribute("data-src", ""),
+                element.style("src", "")
+        );
+        if (source.isBlank()) return false;
+        BufferedImage image = imageLoader.load(source);
+        if (image == null) return false;
+        Rectangle target = imageTarget(element, image, r, "object-fit", "object-position");
+        g.drawImage(image, target.x, target.y, target.width, target.height, null);
+        return true;
     }
 
     public void paintProgress(Graphics2D g, UiDomElement element, Rectangle r) {
@@ -246,9 +259,9 @@ public final class HtmlDomPaintEngine {
     private boolean fillBackgroundImage(Graphics2D g, UiDomElement element, String raw, Rectangle r, int radius) {
         String resource = urlResource(raw);
         if (resource.isBlank()) return false;
-        BufferedImage image = loadBackgroundImage(resource);
+        BufferedImage image = imageLoader.load(resource);
         if (image == null) return false;
-        Rectangle target = backgroundImageTarget(element, image, r);
+        Rectangle target = imageTarget(element, image, r, "background-size", "background-position");
         Shape oldClip = g.getClip();
         Shape clip = radius > 0 ? new RoundRectangle2D.Float(r.x, r.y, r.width, r.height, radius, radius) : r;
         try {
@@ -260,19 +273,29 @@ public final class HtmlDomPaintEngine {
         return true;
     }
 
-    private Rectangle backgroundImageTarget(UiDomElement element, BufferedImage image, Rectangle r) {
-        String size = first(element, "background-size").trim().toLowerCase(Locale.ROOT);
-        float scale;
+    private Rectangle imageTarget(UiDomElement element, BufferedImage image, Rectangle r, String sizeProperty, String positionProperty) {
+        String size = first(element, sizeProperty).trim().toLowerCase(Locale.ROOT);
+        float scaleX = r.width / (float) image.getWidth();
+        float scaleY = r.height / (float) image.getHeight();
+        int w;
+        int h;
+        boolean objectFit = "object-fit".equals(sizeProperty);
         if ("contain".equals(size)) {
-            scale = Math.min(r.width / (float) image.getWidth(), r.height / (float) image.getHeight());
-        } else if ("auto".equals(size) || size.isBlank()) {
-            scale = 1f;
+            float scale = Math.min(scaleX, scaleY);
+            w = Math.max(1, Math.round(image.getWidth() * scale));
+            h = Math.max(1, Math.round(image.getHeight() * scale));
+        } else if ("fill".equals(size) || (objectFit && size.isBlank())) {
+            w = Math.max(1, r.width);
+            h = Math.max(1, r.height);
+        } else if ("none".equals(size) || "auto".equals(size) || size.isBlank()) {
+            w = Math.max(1, image.getWidth());
+            h = Math.max(1, image.getHeight());
         } else {
-            scale = Math.max(r.width / (float) image.getWidth(), r.height / (float) image.getHeight());
+            float scale = Math.max(scaleX, scaleY);
+            w = Math.max(1, Math.round(image.getWidth() * scale));
+            h = Math.max(1, Math.round(image.getHeight() * scale));
         }
-        int w = Math.max(1, Math.round(image.getWidth() * scale));
-        int h = Math.max(1, Math.round(image.getHeight() * scale));
-        String position = first(element, "background-position").trim().toLowerCase(Locale.ROOT);
+        String position = first(element, positionProperty).trim().toLowerCase(Locale.ROOT);
         int x = r.x;
         int y = r.y;
         if (position.contains("right")) x = r.x + r.width - w;
@@ -282,53 +305,12 @@ public final class HtmlDomPaintEngine {
         return new Rectangle(x, y, w, h);
     }
 
-    private BufferedImage loadBackgroundImage(String resource) {
-        String key = normalizeImageUrl(stripQueryAndFragment(resource));
-        if (key.isBlank()) return null;
-        return BACKGROUND_IMAGE_CACHE.computeIfAbsent(key, this::readBackgroundImage);
-    }
-
-    private BufferedImage readBackgroundImage(String resource) {
-        Path directPath = imageFilePath(resource);
-        if (directPath != null && Files.isRegularFile(directPath)) {
-            try {
-                return ImageIO.read(directPath.toFile());
-            } catch (IOException ignored) {
-                return null;
-            }
+    private String firstNonBlank(String... values) {
+        if (values == null) return "";
+        for (String value : values) {
+            if (value != null && !value.isBlank()) return value.trim();
         }
-
-        String classpathResource = stripLeadingSlash(resource);
-        try (InputStream stream = HtmlDomPaintEngine.class.getClassLoader().getResourceAsStream(classpathResource)) {
-            if (stream != null) return ImageIO.read(stream);
-        } catch (IOException ignored) {
-            return null;
-        }
-
-        Path relativePath = imageFilePath(classpathResource);
-        if (relativePath != null && Files.isRegularFile(relativePath)) {
-            try {
-                return ImageIO.read(relativePath.toFile());
-            } catch (IOException ignored) {
-                return null;
-            }
-        }
-        return null;
-    }
-
-    private Path imageFilePath(String resource) {
-        if (resource == null || resource.isBlank()) return null;
-        String value = resource.trim().replace('\\', '/');
-        try {
-            if (value.toLowerCase(Locale.ROOT).startsWith("file:")) return Path.of(URI.create(value));
-            return Path.of(value);
-        } catch (RuntimeException ignored) {
-            return null;
-        }
-    }
-
-    private String normalizeImageUrl(String resource) {
-        return resource == null ? "" : resource.trim().replace('\\', '/');
+        return "";
     }
 
     private boolean containsUrl(String raw) {

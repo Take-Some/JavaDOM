@@ -57,7 +57,7 @@ public final class HtmlDomSwingPanel extends JPanel implements HtmlDomInputRoute
     private final HtmlDomPositioningController positioningController = new HtmlDomPositioningController();
     private final HtmlDomFocusController focusController = new HtmlDomFocusController();
     private final HtmlDomHitTestEngine hitTest = new HtmlDomHitTestEngine();
-    private final HtmlDomPaintEngine paintEngine = new HtmlDomPaintEngine();
+    private final HtmlDomPaintEngine paintEngine;
     private final HtmlDomTextPaintEngine textPaintEngine = new HtmlDomTextPaintEngine();
     private final HtmlDomOverlayPaintEngine overlayPaintEngine = new HtmlDomOverlayPaintEngine();
     private final HtmlDomScrollbarPaintEngine scrollbarPaintEngine = new HtmlDomScrollbarPaintEngine();
@@ -113,6 +113,7 @@ public final class HtmlDomSwingPanel extends JPanel implements HtmlDomInputRoute
         );
         UiMarkupDocument document = new UiMarkupParser().parse(safeMarkup, resolvedSourcePath);
         this.dom = document.dom();
+        this.paintEngine = new HtmlDomPaintEngine(HtmlDomSwingPanel.class.getClassLoader(), resolvedSourcePath, stylesheetBasePath);
         logMarkupDiagnostics(document);
         FontAwesomeFonts.register(HtmlDomFonts.registry());
         this.lua = new HtmlDomLuaRuntime(this.dom);

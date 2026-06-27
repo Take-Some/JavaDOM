@@ -25,12 +25,15 @@ import java.util.Locale;
 /** Text, inline-run, icon and simple form-control painter for the desktop Java2D renderer. */
 public final class HtmlDomTextPaintEngine {
     public void paintSpecialOrText(Graphics2D g, UiDomElement element, Rectangle r, Context context) {
+        String tag = element.tagName();
+        if ("img".equals(tag) && context.paint().paintImage(g, element, r)) {
+            return;
+        }
         String iconGlyph = FontAwesomeIcons.glyph(element.classList().values());
         if (!iconGlyph.isBlank()) {
             drawIcon(g, element, iconGlyph, r, context);
             return;
         }
-        String tag = element.tagName();
         UiCssLayoutResult layout = context.layout();
         if (layout != null && !layout.inlineBoxes(element).isEmpty()) {
             paintInlineBoxes(g, element, layout.inlineBoxes(element), context);
@@ -53,6 +56,10 @@ public final class HtmlDomTextPaintEngine {
             Font font;
             int size = Math.max(8, Math.round(context.paint().length(styleElement.style("font-size", "15px"), Math.max(8f, run.height() * 0.8f))));
             if (run.replaced()) {
+                Rectangle runRect = new Rectangle(Math.round(run.x()), Math.round(context.viewportHeight() - run.y() - run.height()), Math.round(run.width()), Math.round(run.height()));
+                if ("img".equals(styleElement.tagName()) && context.paint().paintImage(g, styleElement, runRect)) {
+                    continue;
+                }
                 String glyph = FontAwesomeIcons.glyph(styleElement.classList().values());
                 if (glyph.isBlank() && inlineBoxLike(styleElement)) {
                     paintInlineBlockRun(g, styleElement, run, context);

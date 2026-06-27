@@ -20,6 +20,8 @@ dependencies {
     api project(':html-dom-icons-fontawesome')
     api project(':html-dom-scripting-lua')
     api project(':html-dom-devtools')
+    implementation "org.jfree:org.jfree.svg:${rootProject.jfreeSvgVersion}"
+    implementation "org.apache.xmlgraphics:batik-transcoder:${rootProject.batikVersion}"
 }
 
 application {
