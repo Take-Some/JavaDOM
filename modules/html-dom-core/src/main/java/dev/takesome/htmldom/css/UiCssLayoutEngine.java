@@ -173,7 +173,7 @@ public final class UiCssLayoutEngine {
         this.lengthContext = UiCssUnitResolutionContext.viewport(safeViewportW, safeViewportH, rootFontSize);
         debugOnce("length-context|" + safeViewportW + "x" + safeViewportH + "|" + rootFontSize,
                 "UI CSS length context viewport={}x{} rootFontSize={}", safeViewportW, safeViewportH, rootFontSize);
-        UiCssBox rootBox = resolveExplicitBox(root, null, 0f, 0f, safeViewportW, safeViewportH);
+        UiCssBox rootBox = positioningEngine().resolveInitialBox(root, safeViewportW, safeViewportH);
         writeBox(root, rootBox);
         result.put(root, rootBox);
         commitTextLines(root, rootBox, result);
@@ -311,105 +311,86 @@ public final class UiCssLayoutEngine {
         return relativeOffset(element, new UiCssBox(x0, y0, w, h), parent.width(), parent.height());
     }
 
+    private UiCssPositioningEngine positioningEngine() {
+        return new UiCssPositioningEngine(
+                lengthContext,
+                viewportWidth,
+                viewportHeight,
+                position,
+                bounds,
+                x,
+                y,
+                left,
+                top,
+                right,
+                bottom,
+                width,
+                height,
+                new UiCssPositioningEngine.SizingResolver() {
+                    @Override
+                    public UiCssLength safeLength(String raw, UiCssLength fallback, boolean intrinsic) {
+                        return UiCssLayoutEngine.this.safeLength(raw, fallback, intrinsic);
+                    }
+
+                    @Override
+                    public boolean intrinsicWidthRequested(UiDomElement element, String rawWidth) {
+                        return UiCssLayoutEngine.this.intrinsicWidthRequested(element, rawWidth);
+                    }
+
+                    @Override
+                    public boolean intrinsicHeightRequested(String rawHeight) {
+                        return UiCssLayoutEngine.this.intrinsicHeightRequested(rawHeight);
+                    }
+
+                    @Override
+                    public float intrinsicWidth(UiDomElement element, float reference, float fallback) {
+                        return UiCssLayoutEngine.this.intrinsicWidth(element, reference, fallback);
+                    }
+
+                    @Override
+                    public float intrinsicHeight(UiDomElement element, float referenceW, float referenceH, float fallback) {
+                        return UiCssLayoutEngine.this.intrinsicHeight(element, referenceW, referenceH, fallback);
+                    }
+
+                    @Override
+                    public float resolveBoxSizedWidth(UiDomElement element, float value, float reference, boolean explicit) {
+                        return UiCssLayoutEngine.this.resolveBoxSizedWidth(element, value, reference, explicit);
+                    }
+
+                    @Override
+                    public float resolveBoxSizedHeight(UiDomElement element, float value, float reference, boolean explicit) {
+                        return UiCssLayoutEngine.this.resolveBoxSizedHeight(element, value, reference, explicit);
+                    }
+
+                    @Override
+                    public float clampWidth(UiDomElement element, float value, float reference) {
+                        return UiCssLayoutEngine.this.clampWidth(element, value, reference);
+                    }
+
+                    @Override
+                    public float clampHeight(UiDomElement element, float value, float reference) {
+                        return UiCssLayoutEngine.this.clampHeight(element, value, reference);
+                    }
+
+                    @Override
+                    public float resolveLength(UiDomElement element, String property, String raw, float reference, float fallback) {
+                        return UiCssLayoutEngine.this.resolveLength(element, property, raw, reference, fallback);
+                    }
+                },
+                UiCssLayoutEngine::warnOnce
+        );
+    }
+
     private UiCssBox resolveOutOfFlowBox(UiDomElement element, UiCssBox parentBox) {
-        String pos = positionValue(element);
-        if ("fixed".equals(pos)) return resolveExplicitBox(element, null, 0f, 0f, viewportWidth, viewportHeight);
-        UiCssBox containing = containingBlockFor(element, parentBox);
-        return resolveExplicitBox(element, containing, containing.x(), containing.y(), containing.width(), containing.height());
-    }
-
-    private UiCssBox containingBlockFor(UiDomElement element, UiCssBox fallback) {
-        UiDomElement current = element == null ? null : element.parent();
-        while (current != null) {
-            if (positionedForContainingBlock(current)) {
-                float x0 = length(current.style("layout-x", ""), fallback == null ? 0f : fallback.x());
-                float y0 = length(current.style("layout-y", ""), fallback == null ? 0f : fallback.y());
-                float w = length(current.style("width", ""), fallback == null ? viewportWidth : fallback.width());
-                float h = length(current.style("height", ""), fallback == null ? viewportHeight : fallback.height());
-                return new UiCssBox(x0, y0, Math.max(0f, w), Math.max(0f, h));
-            }
-            current = current.parent();
-        }
-        if (fallback != null) return fallback;
-        return new UiCssBox(0f, 0f, viewportWidth, viewportHeight);
-    }
-
-    private boolean positionedForContainingBlock(UiDomElement element) {
-        String pos = positionValue(element);
-        if (pos.equals("relative") || pos.equals("absolute") || pos.equals("fixed") || pos.equals("sticky")) return true;
-        String transform = element.style("transform", "").trim();
-        return !transform.isBlank() && !"none".equalsIgnoreCase(transform);
-    }
-
-    private String positionValue(UiDomElement element) {
-        return element == null ? "static" : element.style("position", "static").trim().toLowerCase(Locale.ROOT);
-    }
-
-    private float length(String raw, float fallback) {
-        if (raw == null || raw.isBlank() || raw.startsWith("var(")) return fallback;
-        String value = raw.trim().toLowerCase(Locale.ROOT).replace("px", "");
-        int space = value.indexOf(' ');
-        if (space > 0) value = value.substring(0, space);
-        try { return Float.parseFloat(value); } catch (RuntimeException ignored) { return fallback; }
-    }
-
-    private UiCssBox resolveExplicitBox(UiDomElement element, UiCssBox parentBox, float originX, float originY, float referenceW, float referenceH) {
-        UiCssBounds explicitBounds = bounds.read(element).orElse(null);
-        String rawWidth = explicitBounds == null ? width.raw(element) : "";
-        String rawHeight = explicitBounds == null ? height.raw(element) : "";
-        boolean intrinsicWidth = explicitBounds == null && intrinsicWidthRequested(element, rawWidth);
-        boolean intrinsicHeight = explicitBounds == null && intrinsicHeightRequested(rawHeight);
-        UiCssLength wLength = explicitBounds == null ? safeLength(rawWidth, UiCssLength.AUTO, intrinsicWidth) : explicitBounds.width();
-        UiCssLength hLength = explicitBounds == null ? safeLength(rawHeight, UiCssLength.AUTO, intrinsicHeight) : explicitBounds.height();
-        float fallbackW = parentBox == null ? referenceW : (intrinsicWidth ? intrinsicWidth(element, referenceW, 0f) : 0f);
-        float fallbackH = parentBox == null ? referenceH : (intrinsicHeight ? intrinsicHeight(element, referenceW, referenceH, 0f) : 0f);
-        float w = clampWidth(element, resolveBoxSizedWidth(element, wLength.resolve(lengthContext, referenceW, fallbackW), referenceW, explicitBounds != null || (!rawWidth.isBlank() && !intrinsicWidth)), referenceW);
-        float h = clampHeight(element, resolveBoxSizedHeight(element, hLength.resolve(lengthContext, referenceH, fallbackH), referenceH, explicitBounds != null || (!rawHeight.isBlank() && !intrinsicHeight)), referenceH);
-        float x0 = originX + resolveExplicitOffset(element, explicitBounds, Axis.X, w, referenceW);
-        float y0 = resolveExplicitY(element, explicitBounds, originY, referenceH, h);
-        return new UiCssBox(x0, y0, w, h);
-    }
-
-    private float resolveExplicitY(UiDomElement element, UiCssBounds explicitBounds, float originY, float referenceH, float height) {
-        if (explicitBounds != null) {
-            return originY + explicitBounds.y().resolve(lengthContext, referenceH, 0f);
-        }
-        String raw = y.raw(element);
-        if (!raw.isBlank()) {
-            return originY + referenceH - height - offset(element, Axis.Y, raw, height, referenceH);
-        }
-        raw = top.raw(element);
-        if (!raw.isBlank()) {
-            return originY + referenceH - height - offset(element, Axis.Y, raw, height, referenceH);
-        }
-        raw = bottom.raw(element);
-        if (!raw.isBlank()) {
-            return originY + resolveLength(element, bottom.name(), raw, referenceH, 0f);
-        }
-        return originY;
-    }
-
-    private float resolveExplicitOffset(UiDomElement element, UiCssBounds explicitBounds, Axis axis, float size, float reference) {
-        if (explicitBounds != null) {
-            UiCssLength resolved = axis == Axis.X ? explicitBounds.x() : explicitBounds.y();
-            return resolved.resolve(lengthContext, reference, 0f);
-        }
-        return explicitOffset(element, axis, size, reference, UiCssLength.AUTO);
+        return positioningEngine().resolveOutOfFlowBox(element, parentBox);
     }
 
     private UiCssBox relativeOffset(UiDomElement element, UiCssBox flowBox, float referenceW, float referenceH) {
-        if (!position.read(element).relative()) return flowBox;
-        float dx = explicitOffset(element, Axis.X, flowBox.width(), referenceW, UiCssLength.ZERO);
-        float dy = explicitOffset(element, Axis.Y, flowBox.height(), referenceH, UiCssLength.ZERO);
-        return new UiCssBox(flowBox.x() + dx, flowBox.y() + dy, flowBox.width(), flowBox.height());
+        return positioningEngine().relativeOffset(element, flowBox, referenceW, referenceH);
     }
 
     private boolean outOfFlow(UiDomElement element) {
-        return position.read(element).outOfFlow() || bounds.read(element).isPresent() || hasExplicitPosition(element);
-    }
-
-    private boolean hasExplicitPosition(UiDomElement element) {
-        return !x.raw(element).isBlank() || !y.raw(element).isBlank() || !left.raw(element).isBlank() || !top.raw(element).isBlank() || !right.raw(element).isBlank() || !bottom.raw(element).isBlank();
+        return positioningEngine().outOfFlow(element);
     }
 
     private Flow flow(UiDomElement element) {
@@ -430,29 +411,6 @@ public final class UiCssLayoutEngine {
         } catch (RuntimeException ex) {
             warnOnce("root-font-size|" + raw, "UI CSS invalid root font-size raw='{}' fallback={} reason='{}'", raw, UiCssUnitResolutionContext.DEFAULT_ROOT_FONT_SIZE, ex.getMessage());
             return UiCssUnitResolutionContext.DEFAULT_ROOT_FONT_SIZE;
-        }
-    }
-
-    private float explicitOffset(UiDomElement element, Axis axis, float size, float reference, UiCssLength fallback) {
-        String raw = axis.primary(this).raw(element);
-        if (!raw.isBlank()) return offset(element, axis, raw, size, reference);
-        raw = axis.startProperty(this).raw(element);
-        if (!raw.isBlank()) return offset(element, axis, raw, size, reference);
-        raw = axis.endProperty(this).raw(element);
-        if (!raw.isBlank()) return Math.max(0f, reference - size - resolveLength(element, axis.endProperty(this).name(), raw, reference, 0f));
-        return fallback.resolve(lengthContext, reference, 0f);
-    }
-
-    private float offset(UiDomElement element, Axis axis, String raw, float size, float reference) {
-        String value = raw.trim().toLowerCase(Locale.ROOT);
-        if (axis.start(value)) return 0f;
-        if (axis.end(value)) return reference - size;
-        if (Axis.CENTER.matches(value)) return (reference - size) * 0.5f;
-        try {
-            return resolveLength(element, axis.primary(this).name(), value, reference, 0f);
-        } catch (RuntimeException ex) {
-            warnOnce("offset|" + raw, "UI CSS layout invalid offset raw='{}' axis={} reference={} size={} reason='{}'", raw, axis, reference, size, ex.getMessage());
-            return 0f;
         }
     }
 
@@ -655,14 +613,14 @@ public final class UiCssLayoutEngine {
     }
 
     private float clampWidth(UiDomElement element, float value, float reference) {
-        return clamp(element, Axis.X, value, minWidth.read(element, UiCssLength.AUTO), maxWidth.read(element, UiCssLength.AUTO), reference);
+        return clamp(element, "X", value, minWidth.read(element, UiCssLength.AUTO), maxWidth.read(element, UiCssLength.AUTO), reference);
     }
 
     private float clampHeight(UiDomElement element, float value, float reference) {
-        return clamp(element, Axis.Y, value, minHeight.read(element, UiCssLength.AUTO), maxHeight.read(element, UiCssLength.AUTO), reference);
+        return clamp(element, "Y", value, minHeight.read(element, UiCssLength.AUTO), maxHeight.read(element, UiCssLength.AUTO), reference);
     }
 
-    private float clamp(UiDomElement element, Axis axis, float value, UiCssLength min, UiCssLength max, float reference) {
+    private float clamp(UiDomElement element, String axis, float value, UiCssLength min, UiCssLength max, float reference) {
         float out = value;
         Float minValue = min.auto() ? null : min.resolve(lengthContext, reference, out);
         Float maxValue = max.auto() ? null : max.resolve(lengthContext, reference, out);
@@ -764,20 +722,6 @@ public final class UiCssLayoutEngine {
     }
 
     private enum Flow { ROW, COLUMN }
-
-    private enum Axis {
-        X, Y;
-        static final CenterKeywords CENTER = new CenterKeywords();
-        UiCssBasePropertySpec primary(UiCssLayoutEngine engine) { return this == X ? engine.x : engine.y; }
-        UiCssBasePropertySpec startProperty(UiCssLayoutEngine engine) { return this == X ? engine.left : engine.top; }
-        UiCssBasePropertySpec endProperty(UiCssLayoutEngine engine) { return this == X ? engine.right : engine.bottom; }
-        boolean start(String value) { return this == X ? "left".equals(value) || "start".equals(value) : "top".equals(value) || "start".equals(value); }
-        boolean end(String value) { return this == X ? "right".equals(value) || "end".equals(value) : "bottom".equals(value) || "end".equals(value); }
-    }
-
-    private static final class CenterKeywords {
-        boolean matches(String value) { return "center".equals(value) || "middle".equals(value); }
-    }
 
     private record Insets(float left, float top, float right, float bottom) { }
 
