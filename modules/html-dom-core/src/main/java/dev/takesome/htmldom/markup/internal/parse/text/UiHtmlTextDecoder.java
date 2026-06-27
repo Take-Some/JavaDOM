@@ -12,8 +12,7 @@ public final class UiHtmlTextDecoder {
         if (syntax.isRawTextTag(tagName)) {
             return raw;
         }
-        String decoded = decodeEntities(raw);
-        return syntax.preservesText(tagName) ? decoded : collapseWhitespace(decoded);
+        return decodeEntities(raw);
     }
 
     public static String decodeEntities(String value) {

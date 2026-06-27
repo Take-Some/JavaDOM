@@ -104,18 +104,24 @@ public final class UiCssLayoutEngine {
     private final LayoutXCssProperty layoutX;
     private final ResolvedVerticalCssProperty layoutY;
     private final UiIntrinsicTextMeasurer textMeasurer;
+    private final UiCssInlineRunTextHook inlineRunTextHook;
 
     public UiCssLayoutEngine() {
-        this(UiCssPropertyRegistry.loadBuiltins(), UiIntrinsicTextMeasurer.heuristic());
+        this(UiCssPropertyRegistry.loadBuiltins(), UiIntrinsicTextMeasurer.heuristic(), UiCssInlineRunTextHook.identity());
     }
 
     public UiCssLayoutEngine(UiCssPropertyRegistry registry) {
-        this(registry, UiIntrinsicTextMeasurer.heuristic());
+        this(registry, UiIntrinsicTextMeasurer.heuristic(), UiCssInlineRunTextHook.identity());
     }
 
     public UiCssLayoutEngine(UiCssPropertyRegistry registry, UiIntrinsicTextMeasurer textMeasurer) {
+        this(registry, textMeasurer, UiCssInlineRunTextHook.identity());
+    }
+
+    public UiCssLayoutEngine(UiCssPropertyRegistry registry, UiIntrinsicTextMeasurer textMeasurer, UiCssInlineRunTextHook inlineRunTextHook) {
         Objects.requireNonNull(registry, "registry");
         this.textMeasurer = textMeasurer == null ? UiIntrinsicTextMeasurer.heuristic() : textMeasurer;
+        this.inlineRunTextHook = inlineRunTextHook == null ? UiCssInlineRunTextHook.identity() : inlineRunTextHook;
         this.display = registry.requireType(DisplayCssProperty.class);
         this.position = registry.requireType(PositionCssProperty.class);
         this.flexDirection = registry.requireType(FlexDirectionCssProperty.class);
@@ -186,7 +192,7 @@ public final class UiCssLayoutEngine {
     private void layoutFlowChildren(UiDomElement parent, UiCssBox parentBox, UiCssLayoutResult result) {
         Flow flow = flow(parent);
         Insets insets = padding(parent, parentBox);
-        float resolvedGap = gap.read(parent, UiCssLength.ZERO).resolve(lengthContext, flow == Flow.ROW ? parentBox.width() : parentBox.height(), 0f);
+        float resolvedGap = gap.read(parent, UiCssLength.ZERO, flow == Flow.ROW).resolve(lengthContext, flow == Flow.ROW ? parentBox.width() : parentBox.height(), 0f);
         float contentWidth = Math.max(0f, parentBox.width() - insets.left - insets.right);
         float cursor = flow == Flow.COLUMN ? textBlockHeight(parent, contentWidth) : 0f;
         for (UiDomNode childNode : parent.children()) {
@@ -204,7 +210,7 @@ public final class UiCssLayoutEngine {
         Insets insets = padding(parent, parentBox);
         float mainSize = Math.max(0f, flow == Flow.ROW ? parentBox.width() - insets.left - insets.right : parentBox.height() - insets.top - insets.bottom);
         float crossSize = Math.max(0f, flow == Flow.ROW ? parentBox.height() - insets.top - insets.bottom : parentBox.width() - insets.left - insets.right);
-        float resolvedGap = gap.read(parent, UiCssLength.ZERO).resolve(lengthContext, mainSize, 0f);
+        float resolvedGap = gap.read(parent, UiCssLength.ZERO, flow == Flow.ROW).resolve(lengthContext, mainSize, 0f);
         List<FlexLine> lines = flexLines(parent, parentBox, flow, mainSize, crossSize, resolvedGap);
         String justify = justifyContent.read(parent);
         String align = alignItems.read(parent);
@@ -542,7 +548,7 @@ public final class UiCssLayoutEngine {
 
     private float intrinsicChildrenWidth(UiDomElement element, float reference) {
         Flow childFlow = flow(element);
-        float resolvedGap = gap.read(element, UiCssLength.ZERO).resolve(lengthContext, reference, 0f);
+        float resolvedGap = gap.read(element, UiCssLength.ZERO, childFlow == Flow.ROW).resolve(lengthContext, reference, 0f);
         float row = 0f;
         float column = 0f;
         int count = 0;
@@ -563,7 +569,7 @@ public final class UiCssLayoutEngine {
 
     private float intrinsicChildrenHeight(UiDomElement element, float referenceW, float referenceH) {
         Flow childFlow = flow(element);
-        float resolvedGap = gap.read(element, UiCssLength.ZERO).resolve(lengthContext, childFlow == Flow.ROW ? referenceW : referenceH, 0f);
+        float resolvedGap = gap.read(element, UiCssLength.ZERO, childFlow == Flow.ROW).resolve(lengthContext, childFlow == Flow.ROW ? referenceW : referenceH, 0f);
         float row = 0f;
         float column = 0f;
         int count = 0;
@@ -627,27 +633,64 @@ public final class UiCssLayoutEngine {
         float cursorTop = box.y() + box.height() - p.top;
         ArrayList<UiCssLineBox> lineBoxes = new ArrayList<>();
         ArrayList<UiCssInlineBox> inlineBoxes = new ArrayList<>();
+        int lineIndex = 0;
         for (InlineLine line : lines) {
             float lineHeight = Math.max(1f, line.height);
             float baseline = Math.max(0f, line.baseline);
             float dx = "center".equals(align) ? (contentW - line.width) * 0.5f : "right".equals(align) || "end".equals(align) ? contentW - line.width : 0f;
             float lineY = cursorTop - lineHeight;
             StringBuilder text = new StringBuilder();
+            int runIndex = 0;
             for (InlineToken run : line.runs) {
                 if (run.lineBreak) continue;
                 float runY = lineY + lineHeight - baseline - run.height + run.baseline + run.verticalOffset;
                 float runX = box.x() + p.left + Math.max(0f, dx) + run.x;
-                inlineBoxes.add(new UiCssInlineBox(run.sourceNodeId, run.styleElement.nodeId(), run.text, run.atomic, runX, runY, run.width, run.height, run.baseline));
-                if (!run.text.isBlank()) {
-                    if (run.spaceBefore && !text.isEmpty()) text.append(' ');
-                    text.append(run.text);
+                UiCssInlineRunText runText = resolveInlineRunText(element, run, runX, runY, lineIndex, runIndex++);
+                inlineBoxes.add(new UiCssInlineBox(run.sourceNodeId, run.styleElement.nodeId(), runText.paintText(), run.atomic, runX, runY, run.width, run.height, run.baseline));
+                if (!runText.lineText().isBlank()) {
+                    if ((run.spaceBefore || run.leadingAdvance > 0f) && !text.isEmpty()) text.append(' ');
+                    text.append(runText.lineText());
                 }
                 else if (run.atomic) text.append('\u25a1');
             }
             lineBoxes.add(new UiCssLineBox(text.toString(), box.x() + p.left + Math.max(0f, dx), lineY, line.width, lineHeight, baseline));
             cursorTop -= lineHeight;
+            lineIndex++;
         }
         return new InlineLayout(lineBoxes, inlineBoxes);
+    }
+
+    private UiCssInlineRunText resolveInlineRunText(UiDomElement owner, InlineToken run, float runX, float runY, int lineIndex, int runIndex) {
+        UiCssInlineRunText fallback = UiCssInlineRunText.text(run.text);
+        if (run.lineBreak) return fallback;
+        UiCssInlineRunTextEvent event = new UiCssInlineRunTextEvent(
+                owner,
+                run.styleElement,
+                run.sourceNodeId,
+                run.text,
+                run.atomic,
+                run.lineBreak,
+                run.spaceBefore,
+                run.leadingAdvance,
+                runX,
+                runY,
+                run.width,
+                run.height,
+                run.baseline,
+                lineIndex,
+                runIndex
+        );
+        try {
+            UiCssInlineRunText resolved = inlineRunTextHook.resolve(event);
+            return resolved == null ? fallback : resolved;
+        } catch (RuntimeException error) {
+            warnOnce(
+                    "inline-run-text-hook|" + summary(owner) + '|' + error.getClass().getName() + '|' + error.getMessage(),
+                    "UI CSS inline run text hook failed element={} line={} run={} reason='{}'; using original inline text",
+                    summary(owner), lineIndex, runIndex, error.getMessage()
+            );
+            return fallback;
+        }
     }
 
     private float textBlockHeight(UiDomElement element, float contentWidth) {
@@ -769,7 +812,7 @@ public final class UiCssLayoutEngine {
         float baseline = atomic ? atomicBaseline(fragment.styleElement, height) : Math.min(height, Math.max(0f, (height - size) * 0.5f + size * 0.86f));
         float spaceWidth = spaceBefore ? textWidth(fragment.styleElement, " ") : 0f;
         float verticalOffset = verticalAlignOffset(fragment.styleElement, size, height);
-        return new InlineToken(fragment.sourceNodeId, fragment.styleElement, text, atomic, false, spaceBefore, width, height, baseline, verticalOffset, spaceWidth, 0f);
+        return new InlineToken(fragment.sourceNodeId, fragment.styleElement, text, atomic, false, spaceBefore, width, height, baseline, verticalOffset, spaceWidth, 0f, 0f);
     }
 
     private List<InlineFragment> inlineFragments(UiDomElement element) {
@@ -926,7 +969,14 @@ public final class UiCssLayoutEngine {
 
     private float textWidth(UiDomElement element, String text) {
         if (text == null || text.isEmpty()) return 0f;
-        return textMeasurer.measure(text, fontId(element), fontScale(element), fontSize(element, 1f)).width();
+        String fontId = fontId(element);
+        float scale = fontScale(element);
+        float size = fontSize(element, 1f);
+        float measured = textMeasurer.measure(text, fontId, scale, size).width();
+        if (text.trim().isEmpty()) {
+            return Math.max(measured, textMeasurer.spaceWidth(fontId, scale, size));
+        }
+        return measured;
     }
 
     private float lineHeight(UiDomElement element, float fontSize) {
@@ -1307,9 +1357,10 @@ public final class UiCssLayoutEngine {
         private float baseline;
 
         private void add(InlineToken token, float leading) {
-            InlineToken placed = token.at(width + Math.max(0f, leading));
+            float safeLeading = Math.max(0f, leading);
+            InlineToken placed = token.at(width + safeLeading, safeLeading);
             runs.add(placed);
-            width += Math.max(0f, leading) + placed.width;
+            width += safeLeading + placed.width;
             float top = Math.max(0f, placed.height - placed.baseline - placed.verticalOffset);
             float bottom = Math.max(0f, placed.baseline + placed.verticalOffset);
             baseline = Math.max(baseline, bottom);
@@ -1328,12 +1379,17 @@ public final class UiCssLayoutEngine {
         }
     }
 
-    private record InlineToken(int sourceNodeId, UiDomElement styleElement, String text, boolean atomic, boolean lineBreak, boolean spaceBefore, float width, float height, float baseline, float verticalOffset, float spaceWidth, float x) {
+    private record InlineToken(int sourceNodeId, UiDomElement styleElement, String text, boolean atomic, boolean lineBreak, boolean spaceBefore, float width, float height, float baseline, float verticalOffset, float spaceWidth, float x, float leadingAdvance) {
         private InlineToken at(float x) {
-            return new InlineToken(sourceNodeId, styleElement, text, atomic, lineBreak, spaceBefore, width, height, baseline, verticalOffset, spaceWidth, x);
+            return at(x, leadingAdvance);
         }
+
+        private InlineToken at(float x, float leadingAdvance) {
+            return new InlineToken(sourceNodeId, styleElement, text, atomic, lineBreak, spaceBefore, width, height, baseline, verticalOffset, spaceWidth, x, Math.max(0f, leadingAdvance));
+        }
+
         private static InlineToken lineBreak(UiDomElement styleElement) {
-            return new InlineToken(styleElement.nodeId(), styleElement, "", false, true, false, 0f, 0f, 0f, 0f, 0f, 0f);
+            return new InlineToken(styleElement.nodeId(), styleElement, "", false, true, false, 0f, 0f, 0f, 0f, 0f, 0f, 0f);
         }
     }
 

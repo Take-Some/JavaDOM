@@ -21,7 +21,9 @@ import dev.takesome.htmldom.support.logging.HtmlDomLog.Logger;
 /** Applies parsed CSS rules to the UI DOM and writes computed styles. */
 public final class UiCssCascade {
     private static final Logger LOG = HtmlDomLog.logger(UiCssCascade.class);
-    private static final String TRACE_COMPUTED_PROPERTY = "helix.ui.css.traceComputed";
+    private static final String TRACE_COMPUTED_PROPERTY = "htmldom.css.traceComputed";
+    private static final String LEGACY_TRACE_COMPUTED_PROPERTY = "helix.ui.css.traceComputed";
+    private static final String TRACE_CASCADE_PROPERTY = "htmldom.css.traceCascade";
     private static final UiCssSpecificity USER_AGENT_SPECIFICITY = new UiCssSpecificity(-1000, -1000, -1000);
     private static final int USER_AGENT_ORDER = Integer.MIN_VALUE;
     private static final Pattern VAR_PATTERN = Pattern.compile("var\\(\\s*(--[A-Za-z0-9_-]+)\\s*(?:,\\s*([^)]*))?\\)");
@@ -60,13 +62,19 @@ public final class UiCssCascade {
         Objects.requireNonNull(stylesheet, "stylesheet");
         UiDomElement root = document.root();
         Map<String, String> variables = rootVariables(root, stylesheet);
+        long started = System.nanoTime();
+        int elementCount = 0;
+        int matchedRules = 0;
+        int appliedDeclarations = 0;
         for (UiDomElement element : UiDomTraversal.depthFirstElements(root)) {
+            elementCount++;
             element.clearComputedStyle();
             Map<String, AppliedValue> values = new LinkedHashMap<>();
             Map<String, Map<String, AppliedValue>> pseudoValues = new LinkedHashMap<>();
             applyUserAgentRules(element, values, pseudoValues);
             for (UiCssRule rule : stylesheet.rules()) {
                 if (!rule.matches(element)) continue;
+                matchedRules++;
                 Map<String, AppliedValue> target = rule.hasPseudoElement()
                         ? pseudoValues.computeIfAbsent(rule.pseudoElement(), ignored -> new LinkedHashMap<>())
                         : values;
@@ -74,6 +82,7 @@ public final class UiCssCascade {
                     if (declaration.property().startsWith("--")) continue;
                     for (UiCssDeclaration expanded : expandDeclaration(declaration)) {
                         put(target, expanded.property(), expanded.value(), rule.specificity(), rule.order(), "css:" + rule.selectorText());
+                        appliedDeclarations++;
                     }
                 }
             }
@@ -87,6 +96,29 @@ public final class UiCssCascade {
             });
             traceComputedStyleIfRequested(element, resolved, values);
             pseudoValues.forEach((pseudoElement, style) -> style.forEach((property, value) -> element.setPseudoComputedStyle(pseudoElement, property, resolveVariables(value.value(), variables))));
+        }
+        if (Boolean.getBoolean(TRACE_CASCADE_PROPERTY)) {
+            LOG.info(
+                    "UI CSS cascade applied root='{}' elements={} authorRules={} matchedRules={} declarations={} variables={} elapsedMs={}",
+                    elementDescription(root),
+                    elementCount,
+                    stylesheet.rules().size(),
+                    matchedRules,
+                    appliedDeclarations,
+                    variables.keySet(),
+                    Math.max(0L, (System.nanoTime() - started) / 1_000_000L)
+            );
+        } else if (LOG.debugEnabled()) {
+            LOG.debug(
+                    "UI CSS cascade applied root='{}' elements={} authorRules={} matchedRules={} declarations={} variables={} elapsedMs={}",
+                    elementDescription(root),
+                    elementCount,
+                    stylesheet.rules().size(),
+                    matchedRules,
+                    appliedDeclarations,
+                    variables.keySet(),
+                    Math.max(0L, (System.nanoTime() - started) / 1_000_000L)
+            );
         }
     }
 
@@ -176,7 +208,7 @@ public final class UiCssCascade {
 
     private void traceComputedStyleIfRequested(UiDomElement element, Map<String, String> resolved, Map<String, AppliedValue> values) {
         if (element == null || resolved == null || resolved.isEmpty()) return;
-        String configured = System.getProperty(TRACE_COMPUTED_PROPERTY, "");
+        String configured = configuredTraceSelectors();
         if (configured.isBlank()) return;
         for (String rawSelector : configured.split("\s*,\s*")) {
             String selector = trimToEmpty(rawSelector);
@@ -208,6 +240,12 @@ public final class UiCssCascade {
             LOG.warn("Ignoring invalid UI CSS computed trace selector='{}': {}", selector, error.getMessage());
             return false;
         }
+    }
+
+    private String configuredTraceSelectors() {
+        String configured = trimToEmpty(System.getProperty(TRACE_COMPUTED_PROPERTY, ""));
+        if (!configured.isBlank()) return configured;
+        return trimToEmpty(System.getProperty(LEGACY_TRACE_COMPUTED_PROPERTY, ""));
     }
 
     private Map<String, String> sourceSummary(Map<String, AppliedValue> values) {

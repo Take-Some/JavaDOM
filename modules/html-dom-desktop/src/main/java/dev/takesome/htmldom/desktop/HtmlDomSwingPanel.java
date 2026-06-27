@@ -4,10 +4,8 @@ import dev.takesome.htmldom.css.UiCssCascade;
 import dev.takesome.htmldom.css.UiCssLayoutEngine;
 import dev.takesome.htmldom.css.UiCssLayoutResult;
 import dev.takesome.htmldom.css.UiCssPaintTreeBuilder;
-import dev.takesome.htmldom.css.UiCssParser;
 import dev.takesome.htmldom.css.UiCssPropertyRegistry;
 import dev.takesome.htmldom.css.UiCssScrollBox;
-import dev.takesome.htmldom.css.UiCssUserAgentStylesheet;
 import dev.takesome.htmldom.css.UiStylesheet;
 import dev.takesome.htmldom.devtools.HtmlDomDevTools;
 import dev.takesome.htmldom.devtools.HtmlDomDevToolsHitNode;
@@ -19,6 +17,10 @@ import dev.takesome.htmldom.desktop.HtmlDomHitTestEngine.ScrollAxis;
 import dev.takesome.htmldom.desktop.HtmlDomHitTestEngine.ScrollDrag;
 import dev.takesome.htmldom.fonts.HtmlDomFonts;
 import dev.takesome.htmldom.icons.fontawesome.FontAwesomeFonts;
+import dev.takesome.htmldom.html.UiHtmlDiagnostic;
+import dev.takesome.htmldom.html.UiHtmlDiagnosticSeverity;
+import dev.takesome.htmldom.logging.HtmlDomLog;
+import dev.takesome.htmldom.logging.HtmlDomLogger;
 import dev.takesome.htmldom.markup.UiMarkupDocument;
 import dev.takesome.htmldom.markup.UiMarkupParser;
 import dev.takesome.htmldom.scripting.lua.HtmlDomLuaRuntime;
@@ -44,6 +46,7 @@ import java.util.List;
 
 /** Desktop Swing renderer for HtmlDom markup + CSS. No browser and no HTTP server. */
 public final class HtmlDomSwingPanel extends JPanel implements HtmlDomInputRouter.Host {
+    private static final HtmlDomLogger LOG = HtmlDomLog.logger(HtmlDomSwingPanel.class);
     private final UiDomDocument dom;
     private final UiStylesheet stylesheet;
     private final UiCssCascade cascade = new UiCssCascade();
@@ -73,12 +76,32 @@ public final class HtmlDomSwingPanel extends JPanel implements HtmlDomInputRoute
     private UiCssLayoutResult layout;
 
     public HtmlDomSwingPanel(String markup, String css) {
-        UiMarkupDocument document = new UiMarkupParser().parse(markup == null ? "" : markup, "desktop.ui.html");
+        this(markup, css, "desktop.ui.html", "");
+    }
+
+    public HtmlDomSwingPanel(String markup, String css, String stylesheetBasePath) {
+        this(markup, css, "desktop.ui.html", stylesheetBasePath);
+    }
+
+    public HtmlDomSwingPanel(String markup, String css, String sourcePath, String stylesheetBasePath) {
+        String safeMarkup = markup == null ? "" : markup;
+        String safeCss = css == null ? "" : css;
+        String resolvedSourcePath = normalizeSourcePath(sourcePath);
+        LOG.info(
+                "HtmlDom panel bootstrap source='{}' markupChars={} explicitCssChars={} stylesheetBase='{}'",
+                resolvedSourcePath,
+                safeMarkup.length(),
+                safeCss.length(),
+                stylesheetBasePath == null ? "" : stylesheetBasePath
+        );
+        UiMarkupDocument document = new UiMarkupParser().parse(safeMarkup, resolvedSourcePath);
         this.dom = document.dom();
+        logMarkupDiagnostics(document);
         FontAwesomeFonts.register(HtmlDomFonts.registry());
         this.lua = new HtmlDomLuaRuntime(this.dom);
-        this.lua.execute(optionalResource("html-dom/bundled/showcase.lua"), "showcase.lua");
-        this.stylesheet = UiCssUserAgentStylesheet.stylesheet().plus(new UiCssParser().parse(css == null ? "" : css));
+        String luaSource = optionalResource("html-dom/bundled/showcase.lua");
+        if (!luaSource.isBlank()) this.lua.execute(luaSource, "showcase.lua");
+        this.stylesheet = new HtmlDomStylesheetLoader(HtmlDomSwingPanel.class.getClassLoader()).load(this.dom, safeCss, resolvedSourcePath, stylesheetBasePath);
         setOpaque(true);
         setFocusable(true);
         setFocusTraversalKeysEnabled(false);
@@ -86,6 +109,14 @@ public final class HtmlDomSwingPanel extends JPanel implements HtmlDomInputRoute
         this.inputRouter = new HtmlDomInputRouter(this);
         this.inputRouter.install(this);
         this.transitionTimer.setRepeats(true);
+        LOG.info(
+                "HtmlDom panel ready source='{}' elements={} rules={} fontFaces={} keyframes={}",
+                resolvedSourcePath,
+                elementCount(),
+                stylesheet.rules().size(),
+                stylesheet.fontFaces().size(),
+                stylesheet.keyframes().size()
+        );
     }
 
     public UiDomDocument document() {
@@ -110,12 +141,7 @@ public final class HtmlDomSwingPanel extends JPanel implements HtmlDomInputRoute
     }
 
     public HtmlDomDevToolsSnapshot devToolsSnapshot() {
-        if (layout == null) {
-            cascade.apply(dom, stylesheet);
-            applyTransitions();
-            layout = layoutEngine.layout(dom, Math.max(1, getWidth()), Math.max(1, getHeight()));
-            scrollController.sync(layout);
-        }
+        if (layout == null) applyStylesAndLayout("devtools");
         return HtmlDomDevTools.snapshot(dom, layout, paintTreeBuilder.build(dom, layout), scrollController.resolvedScrollBoxes(layout));
     }
 
@@ -136,10 +162,61 @@ public final class HtmlDomSwingPanel extends JPanel implements HtmlDomInputRoute
 
     private static String optionalResource(String path) {
         try (java.io.InputStream stream = HtmlDomSwingPanel.class.getClassLoader().getResourceAsStream(path)) {
-            if (stream == null) return "";
-            return new String(stream.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
-        } catch (java.io.IOException ignored) {
+            if (stream == null) {
+                LOG.debug("HtmlDom optional resource missing path='{}'", path);
+                return "";
+            }
+            byte[] bytes = stream.readAllBytes();
+            LOG.debug("HtmlDom optional resource loaded path='{}' bytes={}", path, bytes.length);
+            return new String(bytes, java.nio.charset.StandardCharsets.UTF_8);
+        } catch (java.io.IOException error) {
+            LOG.warn("HtmlDom optional resource read failed path='{}' error='{}'", path, error.getMessage());
             return "";
+        }
+    }
+
+    private static String normalizeSourcePath(String sourcePath) {
+        if (sourcePath == null || sourcePath.isBlank()) return "desktop.ui.html";
+        return sourcePath.trim().replace('\\', '/');
+    }
+
+    private void logMarkupDiagnostics(UiMarkupDocument document) {
+        if (document == null) return;
+        if (!document.hasDiagnostics()) {
+            LOG.info("HtmlDom markup parsed source='{}' diagnostics=0", document.sourcePath());
+            return;
+        }
+        LOG.warn("HtmlDom markup parsed source='{}' diagnostics={}", document.sourcePath(), document.diagnostics().size());
+        for (UiHtmlDiagnostic diagnostic : document.diagnostics()) {
+            if (diagnostic.severity() == UiHtmlDiagnosticSeverity.ERROR) {
+                LOG.error("HtmlDom markup diagnostic severity='{}' code='{}' at={} message='{}'", diagnostic.severity(), diagnostic.code(), diagnostic.jumpTarget(), diagnostic.message());
+            } else {
+                LOG.warn("HtmlDom markup diagnostic severity='{}' code='{}' at={} message='{}'", diagnostic.severity(), diagnostic.code(), diagnostic.jumpTarget(), diagnostic.message());
+            }
+        }
+    }
+
+    private int elementCount() {
+        if (dom == null || dom.rootOptional().isEmpty()) return 0;
+        return UiDomTraversal.depthFirstElements(dom.documentElement()).size();
+    }
+
+    private void applyStylesAndLayout(String reason) {
+        long started = System.nanoTime();
+        cascade.apply(dom, stylesheet);
+        applyTransitions();
+        layout = layoutEngine.layout(dom, Math.max(1, getWidth()), Math.max(1, getHeight()));
+        scrollController.sync(layout);
+        if (LOG.debugEnabled()) {
+            LOG.debug(
+                    "HtmlDom layout pass reason='{}' viewport={}x{} elements={} rules={} elapsedMs={}",
+                    reason,
+                    Math.max(1, getWidth()),
+                    Math.max(1, getHeight()),
+                    elementCount(),
+                    stylesheet.rules().size(),
+                    Math.max(0L, (System.nanoTime() - started) / 1_000_000L)
+            );
         }
     }
 
@@ -149,10 +226,7 @@ public final class HtmlDomSwingPanel extends JPanel implements HtmlDomInputRoute
 
     @Override public void ensureLayout() {
         if (layout != null) return;
-        cascade.apply(dom, stylesheet);
-        applyTransitions();
-        layout = layoutEngine.layout(dom, Math.max(1, getWidth()), Math.max(1, getHeight()));
-        scrollController.sync(layout);
+        applyStylesAndLayout("ensure");
     }
 
     @Override public HtmlDomHitTestEngine hitTest() {
@@ -370,10 +444,7 @@ public final class HtmlDomSwingPanel extends JPanel implements HtmlDomInputRoute
             g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
             g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
             ScrollAnchor anchor = captureScrollAnchor();
-            cascade.apply(dom, stylesheet);
-            applyTransitions();
-            layout = layoutEngine.layout(dom, Math.max(1, getWidth()), Math.max(1, getHeight()));
-            scrollController.sync(layout);
+            applyStylesAndLayout("paint");
             restoreScrollAnchor(anchor);
             hitTest.clear();
             paintElement(g, dom.documentElement());

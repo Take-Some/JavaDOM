@@ -20,6 +20,18 @@ public final class HtmlDomLog {
             this.delegate = delegate;
         }
 
+        public boolean traceEnabled() {
+            return delegate.traceEnabled();
+        }
+
+        public boolean debugEnabled() {
+            return delegate.debugEnabled();
+        }
+
+        public void trace(String message, Object... args) {
+            delegate.trace(message, args);
+        }
+
         public void debug(String message, Object... args) {
             delegate.debug(message, args);
         }

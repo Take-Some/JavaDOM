@@ -7,6 +7,12 @@ import java.util.Locale;
 public interface UiIntrinsicTextMeasurer {
     UiIntrinsicTextMetrics measure(String text, String fontId, float scale, float fallbackFontSize);
 
+    default float spaceWidth(String fontId, float scale, float fallbackFontSize) {
+        float measured = measure(" ", fontId, scale, fallbackFontSize).width();
+        if (measured > 0f) return measured;
+        return Math.max(1f, fallbackFontSize) * Math.max(0.01f, scale) / 3f;
+    }
+
     static UiIntrinsicTextMeasurer heuristic() {
         return HeuristicTextMeasurer.INSTANCE;
     }
