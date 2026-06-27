@@ -8,11 +8,12 @@ import java.util.Set;
 public final class DisplayCssProperty extends UiCssKeywordPropertySpec<UiDisplayMode> {
     public DisplayCssProperty() {
         super("display", Set.of(), true, Map.of(
-                "none", new UiDisplayMode(true, false),
-                "block", new UiDisplayMode(false, false),
-                "inline", new UiDisplayMode(false, false),
-                "inline-block", new UiDisplayMode(false, false),
-                "flex", new UiDisplayMode(false, true)
-        ), new UiDisplayMode(false, false));
+                "none", new UiDisplayMode(true, false, false, false),
+                "block", new UiDisplayMode(false, false, false, false),
+                "inline", new UiDisplayMode(false, false, true, false),
+                "inline-block", new UiDisplayMode(false, false, true, true),
+                "flex", new UiDisplayMode(false, true, false, false),
+                "inline-flex", new UiDisplayMode(false, true, true, true)
+        ), new UiDisplayMode(false, false, true, false));
     }
 }

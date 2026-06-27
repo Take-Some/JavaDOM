@@ -839,31 +839,21 @@ public final class UiCssLayoutEngine {
     }
 
     private boolean inlineParticipant(UiDomElement element) {
-        String displayValue = firstStyle(element, "display").toLowerCase(Locale.ROOT);
-        if (displayValue.equals("inline") || displayValue.equals("inline-block")) return true;
-        if (replacedInline(element)) return true;
-        return inlineTag(element);
+        if (element == null) return false;
+        UiDisplayMode mode = display.read(element);
+        return !mode.hidden() && mode.inlineLevel();
     }
 
     private boolean atomicInline(UiDomElement element) {
-        return inlineBlock(element) || replacedInline(element) || (inlineLevel(element) && inlineBoxMetrics(element));
-    }
-
-    private boolean inlineLevel(UiDomElement element) {
-        String displayValue = firstStyle(element, "display").toLowerCase(Locale.ROOT);
-        return displayValue.equals("inline") || displayValue.equals("inline-block") || inlineTag(element);
-    }
-
-    private boolean inlineTag(UiDomElement element) {
         if (element == null) return false;
-        return switch (element.tagName()) {
-            case "a", "abbr", "b", "bdi", "bdo", "br", "cite", "code", "data", "dfn", "em", "i", "kbd", "label", "mark", "q", "s", "samp", "small", "span", "strong", "sub", "sup", "time", "u", "var" -> true;
-            default -> false;
-        };
+        UiDisplayMode mode = display.read(element);
+        return !mode.hidden()
+                && mode.inlineLevel()
+                && (mode.atomicInline() || replacedInline(element) || inlineBoxMetrics(element));
     }
 
     private boolean inlineBlock(UiDomElement element) {
-        return "inline-block".equals(firstStyle(element, "display").toLowerCase(Locale.ROOT));
+        return element != null && display.read(element).atomicInline();
     }
 
     private boolean inlineBoxMetrics(UiDomElement element) {

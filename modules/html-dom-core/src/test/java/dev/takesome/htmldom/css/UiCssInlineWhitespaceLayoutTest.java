@@ -89,4 +89,40 @@ final class UiCssInlineWhitespaceLayoutTest {
         assertTrue(padded.height() >= 20f, "vertical padding must contribute to inline box height");
     }
 
+
+    @Test
+    void cssDisplayControlsBlockAndAtomicInlineForAnyTag() {
+        UiMarkupDocument markup = new UiMarkupParser().parse(
+                "<html><body><section class=\"host\">Before <div class=\"chip\">x</div> after</section><section class=\"blocky\">Block</section></body></html>",
+                "css-display-inline-block.html"
+        );
+        UiStylesheet stylesheet = UiCssUserAgentStylesheet.stylesheet().plus(new UiCssParser().parse("""
+                .host {
+                    width: 320px;
+                    height: fit-content;
+                    font-size: 16px;
+                }
+                .chip {
+                    display: inline-block;
+                    width: 22px;
+                    height: 20px;
+                    padding: 4px;
+                }
+                .blocky {
+                    width: 100px;
+                    height: 24px;
+                    background: #123456;
+                }
+                """));
+        new UiCssCascade().apply(markup.dom(), stylesheet);
+        var layout = new UiCssLayoutEngine().layout(markup.dom(), 640, 480);
+        var host = markup.dom().querySelector("section.host").orElseThrow();
+        var blocky = markup.dom().querySelector("section.blocky").orElseThrow();
+        var runs = layout.inlineBoxes(host);
+
+        assertEquals("block", blocky.style("display", ""));
+        assertTrue(layout.box(blocky).isPresent(), "section remains a block box when CSS does not make it inline-level");
+        assertTrue(runs.stream().anyMatch(run -> run.replaced() && run.width() >= 30f), "display:inline-block on div should create an atomic inline box");
+    }
+
 }

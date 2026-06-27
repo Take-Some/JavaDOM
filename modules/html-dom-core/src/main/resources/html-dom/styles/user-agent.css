@@ -1,3 +1,41 @@
+
+html,
+address,
+article,
+aside,
+blockquote,
+body,
+dd,
+details,
+dialog,
+div,
+dl,
+dt,
+fieldset,
+figcaption,
+figure,
+footer,
+form,
+h1,
+h2,
+h3,
+h4,
+h5,
+h6,
+header,
+hgroup,
+li,
+main,
+menu,
+nav,
+ol,
+p,
+pre,
+section,
+ul {
+    display: block;
+}
+
 * {
     box-sizing: content-box;
 }
