@@ -32,7 +32,7 @@ final class HtmlDomStylesheetLoader {
         String base = normalizeBase(baseResourcePath, source);
 
         if (explicitCss != null && !explicitCss.isBlank()) {
-            stylesheet = stylesheet.plus(parseChunk("constructor", source + "#constructor-css", explicitCss));
+            stylesheet = stylesheet.plus(parseChunk("constructor", source + "#constructor-css", explicitCss, base));
             stats.explicitBlocks++;
         }
 
@@ -45,7 +45,7 @@ final class HtmlDomStylesheetLoader {
                         stats.skippedInlineBlocks++;
                         continue;
                     }
-                    stylesheet = stylesheet.plus(parseChunk("inline-style", source + "#" + selector(element), css));
+                    stylesheet = stylesheet.plus(parseChunk("inline-style", source + "#" + selector(element), css, base));
                     stats.inlineBlocks++;
                     continue;
                 }
@@ -67,7 +67,7 @@ final class HtmlDomStylesheetLoader {
                         stats.failedLinks++;
                         continue;
                     }
-                    stylesheet = stylesheet.plus(parseChunk("link", resolved, css));
+                    stylesheet = stylesheet.plus(parseChunk("link", resolved, css, normalizeBase("", resolved)));
                     stats.loadedLinks++;
                 }
             }
@@ -89,25 +89,105 @@ final class HtmlDomStylesheetLoader {
         return stylesheet;
     }
 
-    private UiStylesheet parseChunk(String kind, String name, String css) {
+    private UiStylesheet parseChunk(String kind, String name, String css, String urlBase) {
         String safeName = name == null || name.isBlank() ? "<inline>" : name;
         long started = System.nanoTime();
+        String normalizedCss = resolveCssUrls(css == null ? "" : css, urlBase);
         try {
-            UiStylesheet parsed = parser.parse(css == null ? "" : css);
+            UiStylesheet parsed = parser.parse(normalizedCss);
             LOG.info("UI CSS parsed kind='{}' source='{}' chars={} rules={} fontFaces={} keyframes={} elapsedMs={}",
                     kind,
                     safeName,
-                    css == null ? 0 : css.length(),
+                    normalizedCss.length(),
                     parsed.rules().size(),
                     parsed.fontFaces().size(),
                     parsed.keyframes().size(),
                     elapsedMs(started));
-            warnAboutUnsupportedImports(kind, safeName, css);
+            warnAboutUnsupportedImports(kind, safeName, normalizedCss);
             return parsed;
         } catch (RuntimeException error) {
-            LOG.error("UI CSS parse failed kind='{}' source='{}' chars={}", error, kind, safeName, css == null ? 0 : css.length());
+            LOG.error("UI CSS parse failed kind='{}' source='{}' chars={}", error, kind, safeName, normalizedCss.length());
             return UiStylesheet.empty();
         }
+    }
+
+    private String resolveCssUrls(String css, String base) {
+        if (css == null || css.isBlank() || !css.toLowerCase(Locale.ROOT).contains("url(")) return css == null ? "" : css;
+        StringBuilder out = new StringBuilder(css.length() + 32);
+        int index = 0;
+        while (index < css.length()) {
+            int start = indexOfUrl(css, index);
+            if (start < 0) {
+                out.append(css, index, css.length());
+                break;
+            }
+            int bodyStart = start + 4;
+            int bodyEnd = css.indexOf(')', bodyStart);
+            if (bodyEnd < 0) {
+                out.append(css, index, css.length());
+                break;
+            }
+            out.append(css, index, bodyStart);
+            String original = css.substring(bodyStart, bodyEnd);
+            out.append(resolveCssUrlToken(original, base));
+            index = bodyEnd;
+        }
+        return out.toString();
+    }
+
+    private int indexOfUrl(String css, int fromIndex) {
+        String lower = css.toLowerCase(Locale.ROOT);
+        return lower.indexOf("url(", Math.max(0, fromIndex));
+    }
+
+    private String resolveCssUrlToken(String token, String base) {
+        String raw = token == null ? "" : token.trim();
+        if (raw.isBlank()) return token == null ? "" : token;
+        char quote = 0;
+        if ((raw.startsWith("\"") && raw.endsWith("\"")) || (raw.startsWith("'") && raw.endsWith("'"))) {
+            quote = raw.charAt(0);
+            raw = raw.substring(1, raw.length() - 1).trim();
+        }
+        String resolved = resolveCssAssetUrl(raw, base);
+        if (quote == 0) return resolved;
+        return quote + resolved + quote;
+    }
+
+    private String resolveCssAssetUrl(String url, String base) {
+        String clean = normalizePath(stripQueryAndFragment(url));
+        if (clean.isBlank() || externalUrl(clean) || dataUrl(clean) || absoluteFilePath(clean)) return url;
+        if (clean.startsWith("/")) return clean;
+        if (base == null || base.isBlank()) return clean;
+        String resolved = normalizePath(base + "/" + clean);
+        String absoluteResource = absoluteResourceUrl(resolved);
+        LOG.debug("UI CSS url resolved base='{}' url='{}' resolved='{}'", base, url, absoluteResource);
+        return absoluteResource;
+    }
+
+    private String absoluteResourceUrl(String value) {
+        String normalized = normalizePath(value);
+        if (normalized.isBlank() || absoluteFilePath(normalized) || normalized.startsWith("/")) return normalized;
+        return "/" + stripLeadingSlash(normalized);
+    }
+
+    private boolean resourceExists(String value) {
+        String resource = stripLeadingSlash(stripQueryAndFragment(value));
+        if (resource.isBlank()) return false;
+        try (InputStream stream = classLoader.getResourceAsStream(resource)) {
+            return stream != null;
+        } catch (IOException ignored) {
+            return false;
+        }
+    }
+
+    private boolean dataUrl(String value) {
+        return value != null && value.trim().toLowerCase(Locale.ROOT).startsWith("data:");
+    }
+
+    private boolean absoluteFilePath(String value) {
+        if (value == null || value.isBlank()) return false;
+        String normalized = value.trim().replace('\\', '/');
+        return normalized.startsWith("//") || normalized.matches("^[A-Za-z]:/.*");
     }
 
     private void warnAboutUnsupportedImports(String kind, String name, String css) {
@@ -186,7 +266,7 @@ final class HtmlDomStylesheetLoader {
     private String resolveHref(String href, String base) {
         String cleanHref = normalizePath(stripQueryAndFragment(href));
         if (cleanHref.isBlank() || externalUrl(cleanHref)) return cleanHref;
-        if (cleanHref.startsWith("/")) return stripLeadingSlash(cleanHref);
+        if (cleanHref.startsWith("/")) return cleanHref;
         if (base == null || base.isBlank()) return cleanHref;
         return normalizePath(base + "/" + cleanHref);
     }

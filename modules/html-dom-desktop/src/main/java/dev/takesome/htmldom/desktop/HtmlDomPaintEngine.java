@@ -7,14 +7,25 @@ import dev.takesome.htmldom.dom.UiDomTraversal;
 import java.awt.BasicStroke;
 import java.awt.Color;
 import java.awt.Graphics2D;
+import java.awt.Image;
+import java.awt.image.BufferedImage;
 import java.awt.Rectangle;
 import java.awt.Shape;
 import java.awt.geom.RoundRectangle2D;
+import java.io.IOException;
+import java.io.InputStream;
+import java.net.URI;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Locale;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import javax.imageio.ImageIO;
 
 /** Paint phases for the desktop Java2D renderer. */
 public final class HtmlDomPaintEngine {
+    private static final Map<String, BufferedImage> BACKGROUND_IMAGE_CACHE = new ConcurrentHashMap<>();
     private boolean paintingFixedLayer;
 
     public boolean paintingFixedLayer() {
@@ -216,6 +227,12 @@ public final class HtmlDomPaintEngine {
     }
 
     private void fillBackground(Graphics2D g, UiDomElement element, Rectangle r, int radius) {
+        String image = first(element, "background-image", "background");
+        if (containsUrl(image)) {
+            if (fillBackgroundImage(g, element, image, r, radius)) {
+                return;
+            }
+        }
         String raw = first(element, "background", "background-image", "background-color");
         if (raw.toLowerCase(Locale.ROOT).contains("linear-gradient")) {
             fillSmoothLinear(g, raw, r, radius);
@@ -225,6 +242,129 @@ public final class HtmlDomPaintEngine {
         if (bg == null) return;
         g.setColor(bg);
         g.fill(new RoundRectangle2D.Float(r.x, r.y, r.width, r.height, radius, radius));
+    }
+
+    private boolean fillBackgroundImage(Graphics2D g, UiDomElement element, String raw, Rectangle r, int radius) {
+        String resource = urlResource(raw);
+        if (resource.isBlank()) return false;
+        BufferedImage image = loadBackgroundImage(resource);
+        if (image == null) return false;
+        Rectangle target = backgroundImageTarget(element, image, r);
+        Shape oldClip = g.getClip();
+        Shape clip = radius > 0 ? new RoundRectangle2D.Float(r.x, r.y, r.width, r.height, radius, radius) : r;
+        try {
+            g.clip(clip);
+            g.drawImage(image, target.x, target.y, target.width, target.height, null);
+        } finally {
+            g.setClip(oldClip);
+        }
+        return true;
+    }
+
+    private Rectangle backgroundImageTarget(UiDomElement element, BufferedImage image, Rectangle r) {
+        String size = first(element, "background-size").trim().toLowerCase(Locale.ROOT);
+        float scale;
+        if ("contain".equals(size)) {
+            scale = Math.min(r.width / (float) image.getWidth(), r.height / (float) image.getHeight());
+        } else if ("auto".equals(size) || size.isBlank()) {
+            scale = 1f;
+        } else {
+            scale = Math.max(r.width / (float) image.getWidth(), r.height / (float) image.getHeight());
+        }
+        int w = Math.max(1, Math.round(image.getWidth() * scale));
+        int h = Math.max(1, Math.round(image.getHeight() * scale));
+        String position = first(element, "background-position").trim().toLowerCase(Locale.ROOT);
+        int x = r.x;
+        int y = r.y;
+        if (position.contains("right")) x = r.x + r.width - w;
+        else if (position.contains("center") || position.isBlank()) x = r.x + (r.width - w) / 2;
+        if (position.contains("bottom")) y = r.y + r.height - h;
+        else if (position.contains("center") || position.isBlank()) y = r.y + (r.height - h) / 2;
+        return new Rectangle(x, y, w, h);
+    }
+
+    private BufferedImage loadBackgroundImage(String resource) {
+        String key = normalizeImageUrl(stripQueryAndFragment(resource));
+        if (key.isBlank()) return null;
+        return BACKGROUND_IMAGE_CACHE.computeIfAbsent(key, this::readBackgroundImage);
+    }
+
+    private BufferedImage readBackgroundImage(String resource) {
+        Path directPath = imageFilePath(resource);
+        if (directPath != null && Files.isRegularFile(directPath)) {
+            try {
+                return ImageIO.read(directPath.toFile());
+            } catch (IOException ignored) {
+                return null;
+            }
+        }
+
+        String classpathResource = stripLeadingSlash(resource);
+        try (InputStream stream = HtmlDomPaintEngine.class.getClassLoader().getResourceAsStream(classpathResource)) {
+            if (stream != null) return ImageIO.read(stream);
+        } catch (IOException ignored) {
+            return null;
+        }
+
+        Path relativePath = imageFilePath(classpathResource);
+        if (relativePath != null && Files.isRegularFile(relativePath)) {
+            try {
+                return ImageIO.read(relativePath.toFile());
+            } catch (IOException ignored) {
+                return null;
+            }
+        }
+        return null;
+    }
+
+    private Path imageFilePath(String resource) {
+        if (resource == null || resource.isBlank()) return null;
+        String value = resource.trim().replace('\\', '/');
+        try {
+            if (value.toLowerCase(Locale.ROOT).startsWith("file:")) return Path.of(URI.create(value));
+            return Path.of(value);
+        } catch (RuntimeException ignored) {
+            return null;
+        }
+    }
+
+    private String normalizeImageUrl(String resource) {
+        return resource == null ? "" : resource.trim().replace('\\', '/');
+    }
+
+    private boolean containsUrl(String raw) {
+        return raw != null && raw.toLowerCase(Locale.ROOT).contains("url(");
+    }
+
+    private String urlResource(String raw) {
+        if (raw == null) return "";
+        String value = raw.trim();
+        int start = value.toLowerCase(Locale.ROOT).indexOf("url(");
+        if (start < 0) return "";
+        int bodyStart = start + 4;
+        int bodyEnd = value.indexOf(')', bodyStart);
+        if (bodyEnd < 0) return "";
+        String out = value.substring(bodyStart, bodyEnd).trim();
+        if ((out.startsWith("\"") && out.endsWith("\"")) || (out.startsWith("'") && out.endsWith("'"))) {
+            out = out.substring(1, out.length() - 1).trim();
+        }
+        return out;
+    }
+
+    private String stripQueryAndFragment(String path) {
+        if (path == null) return "";
+        int query = path.indexOf('?');
+        int fragment = path.indexOf('#');
+        int cut = -1;
+        if (query >= 0) cut = query;
+        if (fragment >= 0) cut = cut < 0 ? fragment : Math.min(cut, fragment);
+        return cut < 0 ? path : path.substring(0, cut);
+    }
+
+    private String stripLeadingSlash(String path) {
+        String value = path == null ? "" : path.trim().replace('\\', '/');
+        while (value.startsWith("/")) value = value.substring(1);
+        return value;
     }
 
     private void fillSmoothLinear(Graphics2D g, String raw, Rectangle r, int radius) {
@@ -279,8 +419,19 @@ public final class HtmlDomPaintEngine {
         String value = token == null ? "" : token.trim();
         if (value.isBlank()) return;
         if (value.startsWith("to ") || value.endsWith("deg") || value.endsWith("turn")) return;
-        Color parsed = color(value.split(" ")[0], null);
+        Color parsed = color(gradientColorToken(value), null);
         if (parsed != null) colors.add(parsed);
+    }
+
+    private String gradientColorToken(String value) {
+        String raw = value == null ? "" : value.trim();
+        String lower = raw.toLowerCase(Locale.ROOT);
+        if (lower.startsWith("rgb")) {
+            int end = raw.indexOf(')');
+            return end >= 0 ? raw.substring(0, end + 1) : raw;
+        }
+        int space = raw.indexOf(' ');
+        return space < 0 ? raw : raw.substring(0, space);
     }
 
     private boolean gradientHorizontal(String raw) {
