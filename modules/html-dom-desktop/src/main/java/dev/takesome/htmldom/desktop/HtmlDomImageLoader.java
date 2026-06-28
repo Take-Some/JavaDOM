@@ -4,6 +4,10 @@ import org.apache.batik.transcoder.TranscoderException;
 import org.apache.batik.transcoder.TranscoderInput;
 import org.apache.batik.transcoder.TranscoderOutput;
 import org.apache.batik.transcoder.image.ImageTranscoder;
+import dev.takesome.htmldom.desktop.resource.HtmlDomResource;
+import dev.takesome.htmldom.desktop.resource.HtmlDomResourceBundle;
+import dev.takesome.htmldom.desktop.resource.HtmlDomResourceKind;
+import dev.takesome.htmldom.desktop.resource.HtmlDomResourceResolver;
 
 import javax.imageio.ImageIO;
 import java.awt.image.BufferedImage;
@@ -24,6 +28,7 @@ import java.util.concurrent.ConcurrentHashMap;
 final class HtmlDomImageLoader {
     private final ClassLoader classLoader;
     private final List<String> basePaths;
+    private final HtmlDomResourceResolver resourceResolver;
     private final Map<String, BufferedImage> cache = new ConcurrentHashMap<>();
 
     HtmlDomImageLoader(ClassLoader classLoader, String... basePaths) {
@@ -36,6 +41,7 @@ final class HtmlDomImageLoader {
             }
         }
         this.basePaths = List.copyOf(out);
+        this.resourceResolver = new HtmlDomResourceResolver(this.classLoader, HtmlDomResourceBundle.forDocument("", this.basePaths.toArray(String[]::new)));
     }
 
     BufferedImage load(String resource) {
@@ -45,6 +51,12 @@ final class HtmlDomImageLoader {
     }
 
     private BufferedImage read(String resource) {
+        java.util.Optional<HtmlDomResource> found = resourceResolver.resolve(resource, HtmlDomResourceKind.IMAGE);
+        if (found.isPresent()) {
+            HtmlDomResource res = found.get();
+            BufferedImage img = readBytes(res.bytes(), res.resolvedPath(), res.source());
+            if (img != null) return img;
+        }
         for (Candidate candidate : candidates(resource)) {
             BufferedImage image = candidate.read();
             if (image != null) return image;

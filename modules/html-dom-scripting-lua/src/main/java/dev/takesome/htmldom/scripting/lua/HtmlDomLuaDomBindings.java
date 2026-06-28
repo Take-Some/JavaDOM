@@ -5,7 +5,7 @@ import dev.takesome.htmldom.dom.UiDomElement;
 import org.luaj.vm2.Globals;
 import org.luaj.vm2.LuaTable;
 import org.luaj.vm2.LuaValue;
-import org.luaj.vm2.lib.TwoArgFunction;
+import org.luaj.vm2.Varargs;
 import org.luaj.vm2.lib.VarArgFunction;
 
 /** DOM functions exposed to Lua scripts. */
@@ -35,51 +35,42 @@ public final class HtmlDomLuaDomBindings {
         }
 
         @Override
-        public LuaValue call() {
-            return LuaValue.NIL;
-        }
-
-        @Override
-        public LuaValue call(LuaValue id) {
-            UiDomElement element = element(id.checkjstring());
+        public Varargs invoke(Varargs args) {
+            UiDomElement element = element(args.arg(1).tojstring());
             if (element == null) return LuaValue.NIL;
             return switch (command) {
                 case "text" -> LuaValue.valueOf(element.textContent());
+                case "addClass" -> {
+                    element.classList().add(stringArg(args, 2));
+                    yield LuaValue.TRUE;
+                }
+                case "removeClass" -> {
+                    element.classList().remove(stringArg(args, 2));
+                    yield LuaValue.TRUE;
+                }
+                case "toggleClass" -> {
+                    String token = stringArg(args, 2);
+                    if (element.classList().contains(token)) element.classList().remove(token);
+                    else element.classList().add(token);
+                    yield LuaValue.TRUE;
+                }
+                case "setText" -> {
+                    element.clearChildren();
+                    element.appendChild(document.createText(stringArg(args, 2)));
+                    yield LuaValue.TRUE;
+                }
+                case "getAttribute" -> LuaValue.valueOf(element.attribute(stringArg(args, 2), ""));
+                case "setAttribute" -> {
+                    element.setAttribute(stringArg(args, 2), stringArg(args, 3));
+                    yield LuaValue.TRUE;
+                }
                 default -> LuaValue.NIL;
             };
         }
 
-        @Override
-        public LuaValue call(LuaValue id, LuaValue value) {
-            UiDomElement element = element(id.checkjstring());
-            if (element == null) return LuaValue.NIL;
-            String text = value.isnil() ? "" : value.tojstring();
-            switch (command) {
-                case "addClass" -> element.classList().add(text);
-                case "removeClass" -> element.classList().remove(text);
-                case "toggleClass" -> {
-                    if (element.classList().contains(text)) element.classList().remove(text);
-                    else element.classList().add(text);
-                }
-                case "setText" -> {
-                    element.clearChildren();
-                    element.appendChild(document.createText(text));
-                }
-                case "getAttribute" -> { return LuaValue.valueOf(element.attribute(text, "")); }
-                default -> { }
-            }
-            return LuaValue.TRUE;
-        }
-
-        @Override
-        public LuaValue call(LuaValue id, LuaValue name, LuaValue value) {
-            UiDomElement element = element(id.checkjstring());
-            if (element == null) return LuaValue.NIL;
-            if ("setAttribute".equals(command)) {
-                element.setAttribute(name.checkjstring(), value.isnil() ? "" : value.tojstring());
-                return LuaValue.TRUE;
-            }
-            return LuaValue.NIL;
+        private String stringArg(Varargs args, int index) {
+            LuaValue value = args.arg(index);
+            return value.isnil() ? "" : value.tojstring();
         }
 
         private UiDomElement element(String id) {

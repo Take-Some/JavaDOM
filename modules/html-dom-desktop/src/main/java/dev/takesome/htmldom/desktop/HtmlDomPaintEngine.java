@@ -7,10 +7,13 @@ import dev.takesome.htmldom.dom.UiDomTraversal;
 import java.awt.BasicStroke;
 import java.awt.Color;
 import java.awt.Graphics2D;
+import java.awt.GradientPaint;
+import java.awt.Paint;
 import java.awt.image.BufferedImage;
 import java.awt.Rectangle;
 import java.awt.Shape;
 import java.awt.geom.RoundRectangle2D;
+import java.awt.geom.Rectangle2D;
 import java.util.ArrayList;
 import java.util.Locale;
 
@@ -73,7 +76,7 @@ public final class HtmlDomPaintEngine {
         if (borderWidth > 0f && border != null && !borderStyle.equals("none") && !borderStyle.equals("hidden")) {
             g.setColor(border);
             g.setStroke(HtmlDomBorderStyles.borderStroke(borderWidth, borderStyle));
-            g.draw(new RoundRectangle2D.Float(r.x, r.y, Math.max(0, r.width - 1), Math.max(0, r.height - 1), radius, radius));
+            g.draw(roundedShape(r.x, r.y, Math.max(0, r.width - 1), Math.max(0, r.height - 1), radius));
         }
     }
 
@@ -82,7 +85,7 @@ public final class HtmlDomPaintEngine {
             int radius = Math.round(length(first(element, "border-radius", "border-top-left-radius"), 0));
             g.setColor(color("#50b7ff", Color.CYAN));
             g.setStroke(new BasicStroke(2f));
-            g.draw(new RoundRectangle2D.Float(r.x - 2, r.y - 2, r.width + 3, r.height + 3, radius + 4, radius + 4));
+            g.draw(roundedShape(r.x - 2, r.y - 2, r.width + 3, r.height + 3, radius + 2f));
         }
         String raw = element.style("outline", "");
         float outlineWidth = length(element.style("outline-width", ""), -1);
@@ -94,7 +97,7 @@ public final class HtmlDomPaintEngine {
         float grow = Math.max(1f, outlineWidth);
         g.setColor(outline);
         g.setStroke(new BasicStroke(Math.max(1f, outlineWidth)));
-        g.draw(new RoundRectangle2D.Float(r.x - grow, r.y - grow, r.width + grow * 2f - 1f, r.height + grow * 2f - 1f, radius + grow, radius + grow));
+        g.draw(roundedShape(r.x - grow, r.y - grow, r.width + grow * 2f - 1f, r.height + grow * 2f - 1f, radius + grow));
     }
 
     public boolean paintImage(Graphics2D g, UiDomElement element, Rectangle r) {
@@ -117,9 +120,9 @@ public final class HtmlDomPaintEngine {
         float ratio = max <= 0f ? 0f : Math.max(0f, Math.min(1f, value / max));
         int radius = Math.max(6, r.height / 2);
         g.setColor(color("#0c1524", Color.DARK_GRAY));
-        g.fill(new RoundRectangle2D.Float(r.x, r.y, r.width, r.height, radius, radius));
+        g.fill(roundedShape(r, radius));
         g.setColor(color("#50b7ff", Color.BLUE));
-        g.fill(new RoundRectangle2D.Float(r.x, r.y, Math.round(r.width * ratio), r.height, radius, radius));
+        g.fill(roundedShape(r.x, r.y, Math.round(r.width * ratio), r.height, radius));
     }
 
     public boolean clipsContents(UiDomElement element) {
@@ -129,8 +132,7 @@ public final class HtmlDomPaintEngine {
 
     public Shape clipShape(UiDomElement element, Rectangle rect) {
         int radius = Math.round(length(first(element, "border-radius", "border-top-left-radius"), 0));
-        if (radius <= 0) return rect;
-        return new RoundRectangle2D.Float(rect.x, rect.y, rect.width, rect.height, radius, radius);
+        return roundedShape(rect, radius);
     }
 
     public Color color(String raw, Color fallback) {
@@ -209,6 +211,24 @@ public final class HtmlDomPaintEngine {
         return HtmlDomBorderStyles.borderStyle(explicit, shorthand);
     }
 
+    private Shape roundedShape(Rectangle rectangle, float radius) {
+        if (rectangle == null) {
+            return new Rectangle2D.Float();
+        }
+        return roundedShape(rectangle.x, rectangle.y, rectangle.width, rectangle.height, radius);
+    }
+
+    private Shape roundedShape(float x, float y, float width, float height, float radius) {
+        float safeWidth = Math.max(0f, width);
+        float safeHeight = Math.max(0f, height);
+        float safeRadius = Math.max(0f, Math.min(radius, Math.min(safeWidth, safeHeight) / 2f));
+        if (safeRadius <= 0f) {
+            return new Rectangle2D.Float(x, y, safeWidth, safeHeight);
+        }
+        float arc = safeRadius * 2f;
+        return new RoundRectangle2D.Float(x, y, safeWidth, safeHeight, arc, arc);
+    }
+
     private void paintShadow(Graphics2D g, UiDomElement element, Rectangle r, int radius) {
         String raw = element.style("box-shadow", "").trim();
         if (raw.isBlank() || raw.equalsIgnoreCase("none")) return;
@@ -234,7 +254,7 @@ public final class HtmlDomPaintEngine {
             int alpha = Math.max(8, Math.round(shadow.getAlpha() * 0.16f * t));
             g.setColor(new Color(shadow.getRed(), shadow.getGreen(), shadow.getBlue(), alpha));
             float grow = i * Math.max(1f, blur / Math.max(1f, steps));
-            g.fill(new RoundRectangle2D.Float(r.x + ox - grow, r.y + oy - grow, r.width + grow * 2f, r.height + grow * 2f, radius + grow, radius + grow));
+            g.fill(roundedShape(r.x + ox - grow, r.y + oy - grow, r.width + grow * 2f, r.height + grow * 2f, radius + grow));
         }
     }
 
@@ -253,7 +273,7 @@ public final class HtmlDomPaintEngine {
         Color bg = color(raw, null);
         if (bg == null) return;
         g.setColor(bg);
-        g.fill(new RoundRectangle2D.Float(r.x, r.y, r.width, r.height, radius, radius));
+        g.fill(roundedShape(r, radius));
     }
 
     private boolean fillBackgroundImage(Graphics2D g, UiDomElement element, String raw, Rectangle r, int radius) {
@@ -263,7 +283,7 @@ public final class HtmlDomPaintEngine {
         if (image == null) return false;
         Rectangle target = imageTarget(element, image, r, "background-size", "background-position");
         Shape oldClip = g.getClip();
-        Shape clip = radius > 0 ? new RoundRectangle2D.Float(r.x, r.y, r.width, r.height, radius, radius) : r;
+        Shape clip = roundedShape(r, radius);
         try {
             g.clip(clip);
             g.drawImage(image, target.x, target.y, target.width, target.height, null);
@@ -354,26 +374,21 @@ public final class HtmlDomPaintEngine {
         Color c0 = colors.get(0);
         Color c1 = colors.size() > 1 ? colors.get(colors.size() - 1) : c0;
         Shape oldClip = g.getClip();
-        Shape clip = radius > 0 ? new RoundRectangle2D.Float(r.x, r.y, r.width, r.height, radius, radius) : r;
-        g.clip(clip);
-        int steps;
-        boolean horizontal = gradientHorizontal(raw);
-        if (horizontal) {
-            steps = Math.max(1, r.width);
-            for (int x = 0; x < steps; x++) {
-                float t = steps <= 1 ? 0f : x / (float) (steps - 1);
-                g.setColor(mix(c0, c1, t));
-                g.fillRect(r.x + x, r.y, 1, r.height);
+        Paint oldPaint = g.getPaint();
+        Shape clip = roundedShape(r, radius);
+        try {
+            g.clip(clip);
+            boolean horizontal = gradientHorizontal(raw);
+            if (horizontal) {
+                g.setPaint(new GradientPaint(r.x, r.y, c0, r.x + Math.max(1, r.width), r.y, c1));
+            } else {
+                g.setPaint(new GradientPaint(r.x, r.y, c0, r.x, r.y + Math.max(1, r.height), c1));
             }
-        } else {
-            steps = Math.max(1, r.height);
-            for (int y = 0; y < steps; y++) {
-                float t = steps <= 1 ? 0f : y / (float) (steps - 1);
-                g.setColor(mix(c0, c1, t));
-                g.fillRect(r.x, r.y + y, r.width, 1);
-            }
+            g.fill(clip);
+        } finally {
+            g.setPaint(oldPaint);
+            g.setClip(oldClip);
         }
-        g.setClip(oldClip);
     }
 
     private ArrayList<Color> gradientColors(String raw) {

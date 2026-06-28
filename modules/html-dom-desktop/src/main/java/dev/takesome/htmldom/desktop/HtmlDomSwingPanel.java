@@ -8,9 +8,9 @@ import dev.takesome.htmldom.css.UiCssPropertyRegistry;
 import dev.takesome.htmldom.css.UiCssScrollBox;
 import dev.takesome.htmldom.css.UiCssStyleImpact;
 import dev.takesome.htmldom.css.UiStylesheet;
+import dev.takesome.htmldom.desktop.resource.HtmlDomResourceBundle;
 import dev.takesome.htmldom.css.animation.UiCssAnimationDescriptor;
 import dev.takesome.htmldom.css.animation.UiCssAnimationResolver;
-import dev.takesome.htmldom.css.animation.UiCssAnimationTimeline;
 import dev.takesome.htmldom.devtools.HtmlDomDevTools;
 import dev.takesome.htmldom.devtools.HtmlDomDevToolsHitNode;
 import dev.takesome.htmldom.devtools.HtmlDomDevToolsSnapshot;
@@ -46,16 +46,25 @@ import java.awt.RenderingHints;
 import java.awt.Shape;
 import java.awt.geom.RoundRectangle2D;
 import java.awt.Paint;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
 /** Desktop Swing renderer for HtmlDom markup + CSS. No browser and no HTTP server. */
-public final class HtmlDomSwingPanel extends JPanel implements HtmlDomInputRouter.Host {
+public final class HtmlDomSwingPanel extends JPanel implements HtmlDomInputRouter.Host, HtmlDomSurface {
     private static final HtmlDomLogger LOG = HtmlDomLog.logger(HtmlDomSwingPanel.class);
+    private static final String TRACE_LIFECYCLE_PROPERTY = "htmldom.lifecycle.trace";
+    private static final String TRACE_FORCED_LAYOUT_PROPERTY = "htmldom.lifecycle.traceForcedLayout";
+    private static final long MIN_RUNTIME_EFFECT_INTERVAL_MS = 15L;
+    private static final long FORCED_LAYOUT_LOG_INTERVAL_MS = 1_000L;
+    private static final long DEVTOOLS_REFRESH_INTERVAL_MS = 125L;
+    private static final int COMPOSITOR_DIRTY_PADDING_PX = 96;
     private final HtmlDomConfig config;
+    private final HtmlDomClient client;
     private final UiDomDocument dom;
     private final UiStylesheet stylesheet;
     private final UiCssCascade cascade = new UiCssCascade();
@@ -73,10 +82,13 @@ public final class HtmlDomSwingPanel extends JPanel implements HtmlDomInputRoute
     private final HtmlDomTransformEngine transformEngine = new HtmlDomTransformEngine();
     private final HtmlDomTransitionController transitionController = new HtmlDomTransitionController();
     private final UiCssAnimationResolver animationResolver = new UiCssAnimationResolver();
-    private final UiCssAnimationTimeline animationTimeline = new UiCssAnimationTimeline();
+    private final HtmlDomAnimationFrameExecutor animationFrameExecutor;
     private final long animationEpochMs = System.currentTimeMillis();
-    private final Timer transitionTimer = new Timer(16, event -> repaint());
+    private final Timer transitionTimer;
     private final Map<Integer, Set<String>> animationOverlayProperties = new HashMap<>();
+    private final Map<Integer, AnimationTarget> animationTargets = new HashMap<>();
+    private final Set<UiDomElement> runtimeDirtyElements = new HashSet<>();
+    private final Map<Integer, Rectangle> runtimeDirtyBoundsByNode = new HashMap<>();
     private final Object runtimeLock = new Object();
     private final HtmlDomEventDispatcher eventDispatcher = new HtmlDomEventDispatcher();
     private final HtmlDomPseudoStateController pseudoStateController = new HtmlDomPseudoStateController();
@@ -92,6 +104,14 @@ public final class HtmlDomSwingPanel extends JPanel implements HtmlDomInputRoute
     private boolean layoutDirty = true;
     private long styledDomVersion = -1L;
     private boolean animationsActive;
+    private boolean animationTargetsDirty = true;
+    private HtmlDomLifecyclePhase lifecyclePhase = HtmlDomLifecyclePhase.IDLE;
+    private int lifecycleDepth;
+    private long lifecyclePassSequence;
+    private long lastRuntimeEffectsMs;
+    private long skippedRuntimeEffectTicks;
+    private long lastForcedLayoutLogMs;
+    private long lastDevToolsRefreshMs;
 
     public HtmlDomSwingPanel(String markup, String css) {
         this(markup, css, "desktop.ui.html", "", HtmlDomConfig.defaults());
@@ -114,7 +134,14 @@ public final class HtmlDomSwingPanel extends JPanel implements HtmlDomInputRoute
     }
 
     public HtmlDomSwingPanel(String markup, String css, String sourcePath, String stylesheetBasePath, HtmlDomConfig config) {
+        this(markup, css, sourcePath, stylesheetBasePath, config, HtmlDomClient.DEFAULT);
+    }
+
+    public HtmlDomSwingPanel(String markup, String css, String sourcePath, String stylesheetBasePath, HtmlDomConfig config, HtmlDomClient client) {
         this.config = config == null ? HtmlDomConfig.defaults() : config;
+        this.client = client == null ? HtmlDomClient.DEFAULT : client;
+        this.animationFrameExecutor = new HtmlDomAnimationFrameExecutor(this.config.animationWorkerLimit());
+        this.transitionTimer = new Timer(this.config.animationFrameIntervalMs(), event -> runAnimationFrame());
         String safeMarkup = markup == null ? "" : markup;
         String safeCss = css == null ? "" : css;
         String resolvedSourcePath = normalizeSourcePath(sourcePath);
@@ -130,13 +157,15 @@ public final class HtmlDomSwingPanel extends JPanel implements HtmlDomInputRoute
         );
         UiMarkupDocument document = new UiMarkupParser().parse(safeMarkup, resolvedSourcePath);
         this.dom = document.dom();
+        HtmlDomResourceBundle defaultResourceBundle = HtmlDomResourceBundle.forDocument(resolvedSourcePath, stylesheetBasePath);
+        HtmlDomResourceBundle resourceBundle = this.client.configureResources(resolvedSourcePath, stylesheetBasePath, defaultResourceBundle);
         this.paintEngine = new HtmlDomPaintEngine(HtmlDomSwingPanel.class.getClassLoader(), resolvedSourcePath, stylesheetBasePath);
         logMarkupDiagnostics(document);
         FontAwesomeFonts.register(HtmlDomFonts.registry());
         this.lua = new HtmlDomLuaRuntime(this.dom);
         String luaSource = optionalResource("html-dom/bundled/showcase.lua");
         if (!luaSource.isBlank()) this.lua.execute(luaSource, "showcase.lua");
-        this.stylesheet = new HtmlDomStylesheetLoader(HtmlDomSwingPanel.class.getClassLoader()).load(this.dom, safeCss, resolvedSourcePath, stylesheetBasePath);
+        this.stylesheet = new HtmlDomStylesheetLoader(HtmlDomSwingPanel.class.getClassLoader()).load(this.dom, safeCss, resolvedSourcePath, stylesheetBasePath, resourceBundle);
         setOpaque(true);
         setFocusable(true);
         setFocusTraversalKeysEnabled(false);
@@ -144,18 +173,24 @@ public final class HtmlDomSwingPanel extends JPanel implements HtmlDomInputRoute
         this.inputRouter = new HtmlDomInputRouter(this);
         this.inputRouter.install(this);
         this.transitionTimer.setRepeats(true);
+        if (!this.stylesheet.keyframes().isEmpty()) updateTransitionTimer(true);
         LOG.info(
-                "HtmlDom panel ready source='{}' elements={} rules={} fontFaces={} keyframes={}",
+                "HtmlDom panel ready source='{}' elements={} rules={} fontFaces={} keyframes={} animationWorkerLimit={}",
                 resolvedSourcePath,
                 elementCount(),
                 stylesheet.rules().size(),
                 stylesheet.fontFaces().size(),
-                stylesheet.keyframes().size()
+                stylesheet.keyframes().size(),
+                animationFrameExecutor.maxWorkerThreads()
         );
     }
 
     public UiDomDocument document() {
         return dom;
+    }
+
+    public void executeLua(String source, String chunkName) {
+        lua.execute(source, chunkName);
     }
 
     public HtmlDomEventDispatcher.ListenerRegistration addEventListener(String elementId, String type, HtmlDomEventDispatcher.Handler handler) {
@@ -208,6 +243,7 @@ public final class HtmlDomSwingPanel extends JPanel implements HtmlDomInputRoute
         if (config.devToolsClosePolicy().closeWithHost()) {
             closeDevTools();
         }
+        animationFrameExecutor.close();
         super.removeNotify();
     }
 
@@ -252,37 +288,111 @@ public final class HtmlDomSwingPanel extends JPanel implements HtmlDomInputRoute
         return UiDomTraversal.depthFirstElements(dom.documentElement()).size();
     }
 
-    private void updateStyleLayoutAndEffects(String reason, ScrollAnchor anchor) {
+    private RuntimeUpdateResult updateStyleLayoutAndEffects(String reason, ScrollAnchor anchor) {
+        return updateStyleLayoutAndEffects(reason, anchor, true);
+    }
+
+    private RuntimeUpdateResult updateStyleLayoutAndEffects(String reason, ScrollAnchor anchor, boolean updateRuntimeEffects) {
         synchronized (runtimeLock) {
+            long pass = ++lifecyclePassSequence;
+            HtmlDomLifecyclePhase outerPhase = lifecyclePhase;
+            if (outerPhase != HtmlDomLifecyclePhase.IDLE) {
+                LOG.warn(
+                        "HtmlDom lifecycle reentrant pass pass={} reason='{}' currentPhase={} depth={} thread='{}'",
+                        pass,
+                        reason,
+                        outerPhase,
+                        lifecycleDepth,
+                        Thread.currentThread().getName()
+                );
+            }
+
             long started = System.nanoTime();
             long beforeVersion = dom.version();
+            boolean hadStableSnapshot = layout != null && !layoutDirty && !cascadeDirty && beforeVersion == styledDomVersion;
             boolean cascadeNeeded = cascadeDirty || layout == null || beforeVersion != styledDomVersion;
+            traceForcedLayoutIfNeeded(reason, cascadeNeeded);
+
             UiCssStyleImpact impact = UiCssStyleImpact.NONE;
-            if (cascadeNeeded) {
-                UiCssStyleImpact cascadeImpact = cascade.apply(dom, stylesheet);
-                impact = impact.merge(cascadeImpact);
-                styledDomVersion = dom.version();
-                cascadeDirty = false;
-                if (cascadeImpact.needsLayout()) layoutDirty = true;
+            runtimeDirtyElements.clear();
+            try (PhaseScope ignored = enterLifecyclePhase(HtmlDomLifecyclePhase.STYLE_RECALC, reason, pass)) {
+                if (cascadeNeeded) {
+                    UiCssStyleImpact cascadeImpact = cascade.apply(dom, stylesheet);
+                    impact = impact.merge(cascadeImpact);
+                    styledDomVersion = dom.version();
+                    cascadeDirty = false;
+                    animationTargetsDirty = true;
+                    if (cascadeImpact.needsLayout()) layoutDirty = true;
+                }
             }
 
-            impact = impact.merge(applyRuntimeEffects());
-            if (impact.needsLayout()) layoutDirty = true;
+            if (updateRuntimeEffects) {
+                try (PhaseScope ignored = enterLifecyclePhase(HtmlDomLifecyclePhase.ANIMATION_UPDATE, reason, pass)) {
+                    impact = impact.merge(applyRuntimeEffects(cascadeNeeded));
+                }
+                if (impact.needsLayout()) layoutDirty = true;
 
+                long afterEffectsVersion = dom.version();
+                if (afterEffectsVersion != styledDomVersion) {
+                    cascadeDirty = true;
+                    layoutDirty = true;
+                    if (LOG.debugEnabled()) {
+                        LOG.debug(
+                                "HtmlDom lifecycle dirtied during effects pass={} reason='{}' styledVersion={} currentVersion={}",
+                                pass,
+                                reason,
+                                styledDomVersion,
+                                afterEffectsVersion
+                        );
+                    }
+                }
+            }
+
+            boolean layoutUpdated = false;
             if (layout == null || layoutDirty) {
-                layout = layoutEngine.layout(dom, Math.max(1, getWidth()), Math.max(1, getHeight()));
-                scrollController.sync(layout);
-                layoutDirty = false;
-                if (anchor != null) restoreScrollAnchor(anchor);
+                try (PhaseScope ignored = enterLifecyclePhase(HtmlDomLifecyclePhase.LAYOUT, reason, pass)) {
+                    layout = layoutEngine.layout(dom, Math.max(1, getWidth()), Math.max(1, getHeight()));
+                    scrollController.sync(layout);
+                    layoutDirty = false;
+                    layoutUpdated = true;
+                    if (anchor != null) restoreScrollAnchor(anchor);
+                }
             }
 
+            UiCssStyleImpact.RuntimeCategory impactCategory = impact.category();
+            if ("animation-frame".equals(reason) && updateRuntimeEffects && impact.layoutAffecting()) {
+                LOG.warn(
+                        "HtmlDom layout-trigger animation-frame impact={} category={} layoutUpdated={} cascade={} dirtyElements={} thread='{}'",
+                        impact,
+                        impactCategory,
+                        layoutUpdated,
+                        cascadeNeeded,
+                        runtimeDirtyElements.size(),
+                        Thread.currentThread().getName()
+                );
+            }
+            if ("animation-frame".equals(reason) && updateRuntimeEffects && hadStableSnapshot && impact.compositorOnly() && (cascadeNeeded || layoutUpdated)) {
+                LOG.warn(
+                        "HtmlDom compositor-only animation-frame caused expensive update impact={} category={} layoutUpdated={} cascade={} dirtyElements={}",
+                        impact,
+                        impactCategory,
+                        layoutUpdated,
+                        cascadeNeeded,
+                        runtimeDirtyElements.size()
+                );
+            }
             if (LOG.debugEnabled()) {
                 LOG.debug(
-                        "HtmlDom runtime pass reason='{}' cascade={} impact={} layout={} viewport={}x{} elements={} rules={} elapsedMs={}",
+                        "HtmlDom runtime pass pass={} reason='{}' cascade={} runtimeEffects={} impact={} impactCategory={} layoutUpdated={} dirtyElements={} skippedEffectTicks={} viewport={}x{} elements={} rules={} elapsedMs={}",
+                        pass,
                         reason,
                         cascadeNeeded,
+                        updateRuntimeEffects,
                         impact,
-                        layout == null ? "none" : "ready",
+                        impactCategory,
+                        layoutUpdated,
+                        runtimeDirtyElements.size(),
+                        skippedRuntimeEffectTicks,
                         Math.max(1, getWidth()),
                         Math.max(1, getHeight()),
                         elementCount(),
@@ -290,15 +400,200 @@ public final class HtmlDomSwingPanel extends JPanel implements HtmlDomInputRoute
                         Math.max(0L, (System.nanoTime() - started) / 1_000_000L)
                 );
             }
+            return new RuntimeUpdateResult(impact, cascadeNeeded, layoutUpdated, updateRuntimeEffects);
         }
     }
 
-    private UiCssStyleImpact applyRuntimeEffects() {
+    private void ensurePaintSnapshot(String reason, ScrollAnchor anchor) {
+        if (!renderSnapshotDirty()) return;
+        updateStyleLayoutAndEffects(reason, anchor, false);
+    }
+
+    private boolean renderSnapshotDirty() {
+        synchronized (runtimeLock) {
+            return layout == null || layoutDirty || cascadeDirty || dom.version() != styledDomVersion;
+        }
+    }
+
+    private void runAnimationFrame() {
+        RuntimeUpdateResult result = updateStyleLayoutAndEffects("animation-frame", null, true);
+        if (result.needsRepaint()) repaintRuntimeFrame(result);
+    }
+
+    private void repaintRuntimeFrame(RuntimeUpdateResult result) {
+        if (result == null || !result.needsRepaint()) return;
+        if (result.requiresFullRepaint()) {
+            repaint();
+            return;
+        }
+        Rectangle dirty = runtimeDirtyBounds();
+        if (dirty == null || dirty.width <= 0 || dirty.height <= 0) {
+            repaint();
+            return;
+        }
+        repaint(dirty.x, dirty.y, dirty.width, dirty.height);
+    }
+
+    private Rectangle runtimeDirtyBounds() {
+        Rectangle dirty = null;
+        for (UiDomElement element : runtimeDirtyElements) {
+            Rectangle current = compositorDirtyRect(element);
+            if (current == null) continue;
+            Rectangle previous = runtimeDirtyBoundsByNode.put(element.nodeId(), new Rectangle(current));
+            dirty = union(dirty, current);
+            dirty = union(dirty, previous);
+        }
+        if (dirty == null) return null;
+        return clampToViewport(dirty);
+    }
+
+    private Rectangle compositorDirtyRect(UiDomElement element) {
+        if (element == null || layout == null) return null;
+        Rectangle rect = rect(element);
+        if (rect == null || rect.width <= 0 || rect.height <= 0) return null;
+        Rectangle dirty = new Rectangle(rect);
+        dirty.grow(COMPOSITOR_DIRTY_PADDING_PX, COMPOSITOR_DIRTY_PADDING_PX);
+        return dirty;
+    }
+
+    private Rectangle clampToViewport(Rectangle rect) {
+        if (rect == null) return null;
+        int maxWidth = Math.max(1, getWidth());
+        int maxHeight = Math.max(1, getHeight());
+        int x1 = Math.max(0, rect.x);
+        int y1 = Math.max(0, rect.y);
+        int x2 = Math.min(maxWidth, rect.x + rect.width);
+        int y2 = Math.min(maxHeight, rect.y + rect.height);
+        if (x2 <= x1 || y2 <= y1) return null;
+        return new Rectangle(x1, y1, x2 - x1, y2 - y1);
+    }
+
+    private Rectangle union(Rectangle a, Rectangle b) {
+        if (b == null) return a;
+        return a == null ? new Rectangle(b) : a.union(b);
+    }
+
+    private void markRuntimeDirty(UiDomElement element) {
+        if (element != null) runtimeDirtyElements.add(element);
+    }
+
+
+    private UiCssStyleImpact applyRuntimeEffects(boolean cascadeWasUpdated) {
+        long now = System.currentTimeMillis();
+        boolean runtimeActive = transitionController.active() || animationsActive;
+        if (!cascadeWasUpdated && runtimeActive && lastRuntimeEffectsMs > 0L && now - lastRuntimeEffectsMs < MIN_RUNTIME_EFFECT_INTERVAL_MS) {
+            skippedRuntimeEffectTicks++;
+            updateTransitionTimer(true);
+            return UiCssStyleImpact.NONE;
+        }
+        lastRuntimeEffectsMs = now;
         UiCssStyleImpact impact = UiCssStyleImpact.NONE;
-        impact = impact.merge(applyTransitions());
-        impact = impact.merge(applyAnimations());
+        impact = impact.merge(applyTransitions(now, cascadeWasUpdated));
+        impact = impact.merge(applyAnimations(now, cascadeWasUpdated));
         updateTransitionTimer(transitionController.active() || animationsActive);
         return impact;
+    }
+
+    private PhaseScope enterLifecyclePhase(HtmlDomLifecyclePhase next, String reason, long pass) {
+        HtmlDomLifecyclePhase previous = lifecyclePhase;
+        lifecyclePhase = next;
+        lifecycleDepth++;
+        client.onLifecycleEvent(new HtmlDomLifecycleEvent(pass, next, reason, true, lifecycleDepth, Thread.currentThread().getName()));
+        if (Boolean.getBoolean(TRACE_LIFECYCLE_PROPERTY)) {
+            LOG.info(
+                    "HtmlDom lifecycle enter pass={} phase={} previous={} reason='{}' depth={} thread='{}'",
+                    pass,
+                    next,
+                    previous,
+                    reason,
+                    lifecycleDepth,
+                    Thread.currentThread().getName()
+            );
+        }
+        return new PhaseScope(pass, reason, previous, next);
+    }
+
+    private void leaveLifecyclePhase(long pass, String reason, HtmlDomLifecyclePhase previous, HtmlDomLifecyclePhase finished) {
+        lifecycleDepth = Math.max(0, lifecycleDepth - 1);
+        lifecyclePhase = lifecycleDepth == 0 ? HtmlDomLifecyclePhase.IDLE : previous;
+        client.onLifecycleEvent(new HtmlDomLifecycleEvent(pass, finished, reason, false, lifecycleDepth, Thread.currentThread().getName()));
+        if (Boolean.getBoolean(TRACE_LIFECYCLE_PROPERTY)) {
+            LOG.info(
+                    "HtmlDom lifecycle leave pass={} phase={} restored={} reason='{}' depth={} thread='{}'",
+                    pass,
+                    finished,
+                    lifecyclePhase,
+                    reason,
+                    lifecycleDepth,
+                    Thread.currentThread().getName()
+            );
+        }
+    }
+
+    private void traceForcedLayoutIfNeeded(String reason, boolean cascadeNeeded) {
+        if (!cascadeNeeded && layout != null && !layoutDirty) return;
+        boolean traceForced = Boolean.getBoolean(TRACE_FORCED_LAYOUT_PROPERTY);
+        if (!traceForced && !LOG.debugEnabled()) return;
+        long now = System.currentTimeMillis();
+        if (now - lastForcedLayoutLogMs < FORCED_LAYOUT_LOG_INTERVAL_MS) return;
+        lastForcedLayoutLogMs = now;
+        String message = "HtmlDom forced layout/update reason='{}' phase={} cascadeDirty={} layoutDirty={} layoutMissing={} styledVersion={} domVersion={} thread='{}'";
+        if (traceForced) {
+            LOG.warn(
+                    message,
+                    reason,
+                    lifecyclePhase,
+                    cascadeDirty,
+                    layoutDirty,
+                    layout == null,
+                    styledDomVersion,
+                    dom.version(),
+                    Thread.currentThread().getName()
+            );
+        } else {
+            LOG.debug(
+                    message,
+                    reason,
+                    lifecyclePhase,
+                    cascadeDirty,
+                    layoutDirty,
+                    layout == null,
+                    styledDomVersion,
+                    dom.version(),
+                    Thread.currentThread().getName()
+            );
+        }
+    }
+
+    private final class PhaseScope implements AutoCloseable {
+        private final long pass;
+        private final String reason;
+        private final HtmlDomLifecyclePhase previous;
+        private final HtmlDomLifecyclePhase current;
+        private boolean closed;
+
+        private PhaseScope(long pass, String reason, HtmlDomLifecyclePhase previous, HtmlDomLifecyclePhase current) {
+            this.pass = pass;
+            this.reason = reason;
+            this.previous = previous;
+            this.current = current;
+        }
+
+        @Override public void close() {
+            if (closed) return;
+            closed = true;
+            leaveLifecyclePhase(pass, reason, previous, current);
+        }
+    }
+
+
+    @Override public HtmlDomConfig config() {
+        return config;
+    }
+
+    @Override public void repaintHost() {
+        updateStyleLayoutAndEffects("repaint-host", null, true);
+        repaint();
     }
 
     @Override public UiCssLayoutResult layoutResult() {
@@ -329,14 +624,12 @@ public final class HtmlDomSwingPanel extends JPanel implements HtmlDomInputRoute
         synchronized (runtimeLock) {
             cascadeDirty = true;
             layoutDirty = true;
+            animationTargetsDirty = true;
             layout = null;
         }
         repaint();
     }
 
-    @Override public void repaintHost() {
-        repaint();
-    }
 
     @Override public void requestPanelFocus() {
         requestFocusInWindow();
@@ -482,10 +775,10 @@ public final class HtmlDomSwingPanel extends JPanel implements HtmlDomInputRoute
         body.classList().add("pulse");
         UiDomElement toast = dom.getElementById("toast").orElse(null);
         if (toast != null) toast.classList().add("open");
-        Timer timer = new Timer(900, event -> {
+        Timer timer = new Timer(config.transientUiResetDelayMs(), event -> {
             body.classList().remove("pulse");
             if (toast != null) toast.classList().remove("open");
-            repaint();
+            repaintHost();
         });
         timer.setRepeats(false);
         timer.start();
@@ -508,8 +801,9 @@ public final class HtmlDomSwingPanel extends JPanel implements HtmlDomInputRoute
         if (!enabled && element.classList().contains(token)) element.classList().remove(token);
     }
 
-    private UiCssStyleImpact applyTransitions() {
-        HtmlDomTransitionController.TickResult result = transitionController.apply(dom);
+    private UiCssStyleImpact applyTransitions(long nowMs, boolean cascadeWasUpdated) {
+        HtmlDomTransitionController.TickResult result = transitionController.apply(dom, nowMs, cascadeWasUpdated);
+        for (UiDomElement element : result.changedElements()) markRuntimeDirty(element);
         for (HtmlDomTransitionController.TransitionEndEvent event : transitionController.drainFinishedEvents()) {
             eventDispatcher.dispatchTransitionEnd(event.element(), event.propertyName(), event.elapsedMs(), domEvent -> {
                 UiDomElement target = domEvent.target();
@@ -520,41 +814,89 @@ public final class HtmlDomSwingPanel extends JPanel implements HtmlDomInputRoute
         return result.impact();
     }
 
-    private UiCssStyleImpact applyAnimations() {
+    private UiCssStyleImpact applyAnimations(long nowMs, boolean cascadeWasUpdated) {
         if (stylesheet.keyframes().isEmpty()) {
+            animationsActive = false;
+            animationTargets.clear();
+            return clearAnimationOverlays();
+        }
+        if (cascadeWasUpdated || animationTargetsDirty) rebuildAnimationTargets();
+        if (animationTargets.isEmpty()) {
             animationsActive = false;
             return clearAnimationOverlays();
         }
-        long nowMs = Math.max(0L, System.currentTimeMillis() - animationEpochMs);
+        long animationNowMs = Math.max(0L, nowMs - animationEpochMs);
+        ArrayList<HtmlDomAnimationFrameExecutor.FrameRequest> requests = new ArrayList<>(animationTargets.size());
+        for (AnimationTarget target : animationTargets.values()) {
+            if (target.element != null) requests.add(new HtmlDomAnimationFrameExecutor.FrameRequest(target.element, target.animations));
+        }
+        List<HtmlDomAnimationFrameExecutor.FrameResult> frames = animationFrameExecutor.computeFrames(requests, stylesheet.keyframes(), animationNowMs);
         UiCssStyleImpact impact = UiCssStyleImpact.NONE;
         boolean running = false;
-        for (UiDomElement element : UiDomTraversal.depthFirstElements(dom.documentElement())) {
-            List<UiCssAnimationDescriptor> animations = animationResolver.resolveAll(element.baseComputedStyle());
-            Map<String, String> frame = animationTimeline.frame(animations, stylesheet.keyframes(), nowMs);
-            Set<String> previous = animationOverlayProperties.computeIfAbsent(element.nodeId(), ignored -> new HashSet<>());
-            Set<String> next = new HashSet<>(frame.keySet());
-            for (String property : List.copyOf(previous)) {
-                if (!next.contains(property) && element.removeAnimatedComputedStyle(property)) {
-                    impact = impact.merge(UiCssStyleImpact.of(property));
-                    previous.remove(property);
+        for (HtmlDomAnimationFrameExecutor.FrameResult frameResult : frames) {
+            UiDomElement element = frameResult.element();
+            Map<String, String> frame = frameResult.frame();
+            Set<String> previous = animationOverlayProperties.get(element.nodeId());
+            if (previous != null) {
+                Iterator<String> iterator = previous.iterator();
+                while (iterator.hasNext()) {
+                    String property = iterator.next();
+                    if (!frame.containsKey(property) && element.removeAnimatedComputedStyle(property)) {
+                        impact = impact.merge(UiCssStyleImpact.of(property));
+                        markRuntimeDirty(element);
+                        iterator.remove();
+                    }
                 }
+            }
+            if (!frame.isEmpty() && previous == null) {
+                previous = new HashSet<>();
+                animationOverlayProperties.put(element.nodeId(), previous);
             }
             for (Map.Entry<String, String> entry : frame.entrySet()) {
                 String property = entry.getKey();
-                if (element.setAnimatedComputedStyle(property, entry.getValue())) impact = impact.merge(UiCssStyleImpact.of(property));
+                if (element.setAnimatedComputedStyle(property, entry.getValue())) {
+                    impact = impact.merge(UiCssStyleImpact.of(property));
+                    markRuntimeDirty(element);
+                }
                 previous.add(property);
             }
-            if (previous.isEmpty()) animationOverlayProperties.remove(element.nodeId());
+            if (previous != null && previous.isEmpty()) animationOverlayProperties.remove(element.nodeId());
             if (!frame.isEmpty()) running = true;
-            for (UiCssAnimationDescriptor animation : animations) {
-                if (animationStillRunning(animation, nowMs)) {
-                    running = true;
-                    break;
+            AnimationTarget target = animationTargets.get(element.nodeId());
+            if (target != null) {
+                for (UiCssAnimationDescriptor animation : target.animations) {
+                    if (animationStillRunning(animation, animationNowMs)) {
+                        running = true;
+                        break;
+                    }
                 }
             }
         }
         animationsActive = running;
         return impact;
+    }
+
+    private void rebuildAnimationTargets() {
+        animationTargets.clear();
+        animationTargetsDirty = false;
+        if (dom == null || dom.rootOptional().isEmpty()) return;
+        for (UiDomElement element : UiDomTraversal.depthFirstElements(dom.documentElement())) {
+            List<UiCssAnimationDescriptor> animations = animationResolver.resolveAll(element.baseComputedStyle());
+            if (hasActiveAnimation(animations) || animationOverlayProperties.containsKey(element.nodeId())) {
+                animationTargets.put(element.nodeId(), new AnimationTarget(element, animations));
+            }
+        }
+        if (LOG.debugEnabled()) {
+            LOG.debug("HtmlDom animation target cache rebuilt targets={} overlays={}", animationTargets.size(), animationOverlayProperties.size());
+        }
+    }
+
+    private boolean hasActiveAnimation(List<UiCssAnimationDescriptor> animations) {
+        if (animations == null || animations.isEmpty()) return false;
+        for (UiCssAnimationDescriptor animation : animations) {
+            if (animation != null && animation.active()) return true;
+        }
+        return false;
     }
 
     private UiCssStyleImpact clearAnimationOverlays() {
@@ -564,10 +906,19 @@ public final class HtmlDomSwingPanel extends JPanel implements HtmlDomInputRoute
             Set<String> properties = animationOverlayProperties.remove(element.nodeId());
             if (properties == null) continue;
             for (String property : properties) {
-                if (element.removeAnimatedComputedStyle(property)) impact = impact.merge(UiCssStyleImpact.of(property));
+                if (element.removeAnimatedComputedStyle(property)) {
+                    impact = impact.merge(UiCssStyleImpact.of(property));
+                    markRuntimeDirty(element);
+                }
             }
         }
         return impact;
+    }
+
+    private record AnimationTarget(UiDomElement element, List<UiCssAnimationDescriptor> animations) {
+        private AnimationTarget {
+            animations = animations == null ? List.of() : List.copyOf(animations);
+        }
     }
 
     private boolean animationStillRunning(UiCssAnimationDescriptor animation, long nowMs) {
@@ -583,20 +934,36 @@ public final class HtmlDomSwingPanel extends JPanel implements HtmlDomInputRoute
         else if (!running && transitionTimer.isRunning()) transitionTimer.stop();
     }
 
+    private void applyRenderHints(Graphics2D g) {
+        boolean aa = config.renderQuality().antialiasing();
+        boolean textAa = config.renderQuality().textAntialiasing();
+        g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, aa ? RenderingHints.VALUE_ANTIALIAS_ON : RenderingHints.VALUE_ANTIALIAS_OFF);
+        g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, textAa ? RenderingHints.VALUE_TEXT_ANTIALIAS_ON : RenderingHints.VALUE_TEXT_ANTIALIAS_OFF);
+    }
+
+    private void refreshDevToolsIfDue() {
+        if (devToolsWindow == null) return;
+        long now = System.currentTimeMillis();
+        if (now - lastDevToolsRefreshMs < DEVTOOLS_REFRESH_INTERVAL_MS && (transitionController.active() || animationsActive)) return;
+        lastDevToolsRefreshMs = now;
+        devToolsWindow.refresh();
+    }
+
     @Override protected void paintComponent(Graphics graphics) {
         super.paintComponent(graphics);
         Graphics2D g = (Graphics2D) graphics.create();
         try {
-            g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
-            g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
+            applyRenderHints(g);
             ScrollAnchor anchor = captureScrollAnchor();
-            updateStyleLayoutAndEffects("paint", anchor);
-            hitTest.clear();
-            paintElement(g, dom.documentElement());
-            paintFixedLayer(g);
-            paintOverlayElements(g);
-            paintDevToolsHighlight(g);
-            if (devToolsWindow != null) devToolsWindow.refresh();
+            ensurePaintSnapshot("paint-snapshot", anchor);
+            try (PhaseScope ignored = enterLifecyclePhase(HtmlDomLifecyclePhase.PAINT, "paint", lifecyclePassSequence)) {
+                hitTest.clear();
+                paintElement(g, dom.documentElement());
+                paintFixedLayer(g);
+                paintOverlayElements(g);
+                paintDevToolsHighlight(g);
+                refreshDevToolsIfDue();
+            }
         } finally {
             g.dispose();
         }
@@ -992,6 +1359,16 @@ public final class HtmlDomSwingPanel extends JPanel implements HtmlDomInputRoute
         catch (RuntimeException ignored) { return 1f; }
     }
 
+
+    private record RuntimeUpdateResult(UiCssStyleImpact impact, boolean cascadeUpdated, boolean layoutUpdated, boolean runtimeEffectsUpdated) {
+        boolean needsRepaint() {
+            return layoutUpdated || cascadeUpdated || (runtimeEffectsUpdated && impact != null && impact.needsPaint());
+        }
+
+        boolean requiresFullRepaint() {
+            return layoutUpdated || cascadeUpdated || (impact != null && impact.needsLayout());
+        }
+    }
 
     private record ScrollAnchor(UiDomElement scroller, UiDomElement element, int x, int y, float scrollX, float scrollY) { }
 

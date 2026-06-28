@@ -3,7 +3,7 @@ plugins {
 }
 
 group = 'dev.takesome'
-version = '1.0.17'
+version = '1.0.26'
 
 ext {
     luajVersion = '3.0.1'
@@ -104,4 +104,16 @@ tasks.register('packageRelease') {
     group = 'distribution'
     description = 'Builds all release jars and the bundled desktop showcase jar.'
     dependsOn 'build', 'bundledHtmlUiJar', ':html-dom-desktop:aioJar'
+}
+
+tasks.register('runHtmlOnlyAnimationDemo') {
+    group = 'application'
+    description = 'Runs the self-contained HTML-only animation and Lua controls demo.'
+    dependsOn ':html-dom-desktop:runHtmlOnlyAnimationDemo'
+}
+
+tasks.register('htmlOnlyAnimationDemoJar') {
+    group = 'distribution'
+    description = 'Builds executable self-contained HTML-only animation and Lua controls demo jar.'
+    dependsOn ':html-dom-desktop:htmlOnlyAnimationDemoJar'
 }

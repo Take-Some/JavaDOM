@@ -7,6 +7,9 @@ import dev.takesome.htmldom.dom.UiDomElement;
 import dev.takesome.htmldom.dom.UiDomTraversal;
 import dev.takesome.htmldom.logging.HtmlDomLog;
 import dev.takesome.htmldom.logging.HtmlDomLogger;
+import dev.takesome.htmldom.desktop.resource.HtmlDomResourceBundle;
+import dev.takesome.htmldom.desktop.resource.HtmlDomResourceKind;
+import dev.takesome.htmldom.desktop.resource.HtmlDomResourceResolver;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -26,13 +29,19 @@ final class HtmlDomStylesheetLoader {
     }
 
     UiStylesheet load(UiDomDocument document, String explicitCss, String sourcePath, String baseResourcePath) {
+        return load(document, explicitCss, sourcePath, baseResourcePath, null);
+    }
+
+    UiStylesheet load(UiDomDocument document, String explicitCss, String sourcePath, String baseResourcePath, HtmlDomResourceBundle resourceBundle) {
         UiStylesheet stylesheet = UiStylesheet.empty();
         LoadStats stats = new LoadStats();
         String source = safeSource(sourcePath);
         String base = normalizeBase(baseResourcePath, source);
+        HtmlDomResourceBundle bundle = resourceBundle == null ? HtmlDomResourceBundle.forDocument(source, base) : resourceBundle;
+        HtmlDomResourceResolver resolver = new HtmlDomResourceResolver(classLoader, bundle);
 
         if (explicitCss != null && !explicitCss.isBlank()) {
-            stylesheet = stylesheet.plus(parseChunk("constructor", source + "#constructor-css", explicitCss, base));
+            stylesheet = stylesheet.plus(parseChunk("constructor", source + "#constructor-css", explicitCss, base, resolver));
             stats.explicitBlocks++;
         }
 
@@ -45,7 +54,7 @@ final class HtmlDomStylesheetLoader {
                         stats.skippedInlineBlocks++;
                         continue;
                     }
-                    stylesheet = stylesheet.plus(parseChunk("inline-style", source + "#" + selector(element), css, base));
+                    stylesheet = stylesheet.plus(parseChunk("inline-style", source + "#" + selector(element), css, base, resolver));
                     stats.inlineBlocks++;
                     continue;
                 }
@@ -61,13 +70,13 @@ final class HtmlDomStylesheetLoader {
                     String href = element.attribute("href", "");
                     String resolved = resolveHref(href, base);
                     LOG.info("UI CSS link discovered source='{}' href='{}' resolved='{}' media='{}'", source, href, resolved, element.attribute("media", ""));
-                    String css = readStylesheet(resolved);
+                    String css = readStylesheet(resolved, resolver);
                     if (css == null) {
                         LOG.warn("UI CSS link failed source='{}' href='{}' resolved='{}'", source, href, resolved);
                         stats.failedLinks++;
                         continue;
                     }
-                    stylesheet = stylesheet.plus(parseChunk("link", resolved, css, normalizeBase("", resolved)));
+                    stylesheet = stylesheet.plus(parseChunk("link", resolved, css, normalizeBase("", resolved), resolver));
                     stats.loadedLinks++;
                 }
             }
@@ -89,10 +98,10 @@ final class HtmlDomStylesheetLoader {
         return stylesheet;
     }
 
-    private UiStylesheet parseChunk(String kind, String name, String css, String urlBase) {
+    private UiStylesheet parseChunk(String kind, String name, String css, String urlBase, HtmlDomResourceResolver resolver) {
         String safeName = name == null || name.isBlank() ? "<inline>" : name;
         long started = System.nanoTime();
-        String normalizedCss = resolveCssUrls(css == null ? "" : css, urlBase);
+        String normalizedCss = resolveCssUrls(css == null ? "" : css, urlBase, resolver);
         try {
             UiStylesheet parsed = parser.parse(normalizedCss);
             LOG.info("UI CSS parsed kind='{}' source='{}' chars={} rules={} fontFaces={} keyframes={} elapsedMs={}",
@@ -111,7 +120,7 @@ final class HtmlDomStylesheetLoader {
         }
     }
 
-    private String resolveCssUrls(String css, String base) {
+    private String resolveCssUrls(String css, String base, HtmlDomResourceResolver resolver) {
         if (css == null || css.isBlank() || !css.toLowerCase(Locale.ROOT).contains("url(")) return css == null ? "" : css;
         StringBuilder out = new StringBuilder(css.length() + 32);
         int index = 0;
@@ -129,7 +138,7 @@ final class HtmlDomStylesheetLoader {
             }
             out.append(css, index, bodyStart);
             String original = css.substring(bodyStart, bodyEnd);
-            out.append(resolveCssUrlToken(original, base));
+            out.append(resolveCssUrlToken(original, base, resolver));
             index = bodyEnd;
         }
         return out.toString();
@@ -140,7 +149,7 @@ final class HtmlDomStylesheetLoader {
         return lower.indexOf("url(", Math.max(0, fromIndex));
     }
 
-    private String resolveCssUrlToken(String token, String base) {
+    private String resolveCssUrlToken(String token, String base, HtmlDomResourceResolver resolver) {
         String raw = token == null ? "" : token.trim();
         if (raw.isBlank()) return token == null ? "" : token;
         char quote = 0;
@@ -148,18 +157,17 @@ final class HtmlDomStylesheetLoader {
             quote = raw.charAt(0);
             raw = raw.substring(1, raw.length() - 1).trim();
         }
-        String resolved = resolveCssAssetUrl(raw, base);
+        String resolved = resolveCssAssetUrl(raw, base, resolver);
         if (quote == 0) return resolved;
         return quote + resolved + quote;
     }
 
-    private String resolveCssAssetUrl(String url, String base) {
+    private String resolveCssAssetUrl(String url, String base, HtmlDomResourceResolver resolver) {
         String clean = normalizePath(stripQueryAndFragment(url));
         if (clean.isBlank() || externalUrl(clean) || dataUrl(clean) || absoluteFilePath(clean)) return url;
         if (clean.startsWith("/")) return clean;
         if (base == null || base.isBlank()) return clean;
-        String resolved = normalizePath(base + "/" + clean);
-        String absoluteResource = absoluteResourceUrl(resolved);
+        String absoluteResource = resolver == null ? absoluteResourceUrl(normalizePath(base + "/" + clean)) : resolver.normalizeForCssUrl(clean, base);
         LOG.debug("UI CSS url resolved base='{}' url='{}' resolved='{}'", base, url, absoluteResource);
         return absoluteResource;
     }
@@ -197,36 +205,13 @@ final class HtmlDomStylesheetLoader {
         }
     }
 
-    private String readStylesheet(String resolved) {
+    private String readStylesheet(String resolved, HtmlDomResourceResolver resolver) {
         if (resolved == null || resolved.isBlank()) return null;
         if (externalUrl(resolved)) {
             LOG.warn("UI CSS external URL is not supported in desktop runtime url='{}'", resolved);
             return null;
         }
-        String resource = stripLeadingSlash(stripQueryAndFragment(resolved));
-        try (InputStream stream = classLoader.getResourceAsStream(resource)) {
-            if (stream != null) {
-                byte[] bytes = stream.readAllBytes();
-                LOG.info("UI CSS resource loaded resource='{}' bytes={}", resource, bytes.length);
-                return new String(bytes, StandardCharsets.UTF_8);
-            }
-        } catch (IOException error) {
-            LOG.error("UI CSS resource read failed resource='{}'", error, resource);
-            return null;
-        }
-
-        Path path = Path.of(resource);
-        if (Files.isRegularFile(path)) {
-            try {
-                String text = Files.readString(path, StandardCharsets.UTF_8);
-                LOG.info("UI CSS file loaded path='{}' chars={}", path, text.length());
-                return text;
-            } catch (IOException error) {
-                LOG.error("UI CSS file read failed path='{}'", error, path);
-            }
-        }
-        LOG.warn("UI CSS resource not found resource='{}'", resource);
-        return null;
+        return resolver.resolveText(resolved, HtmlDomResourceKind.CSS).orElse(null);
     }
 
     private LinkDecision classifyLink(UiDomElement element) {

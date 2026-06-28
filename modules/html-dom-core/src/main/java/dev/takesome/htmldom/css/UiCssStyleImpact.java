@@ -11,17 +11,49 @@ public enum UiCssStyleImpact {
     PAINT,
     LAYOUT;
 
+    public enum RuntimeCategory {
+        NONE,
+        COMPOSITOR_ONLY,
+        PAINT_ONLY,
+        LAYOUT_AFFECTING
+    }
+
     public UiCssStyleImpact merge(UiCssStyleImpact other) {
         if (other == null) return this;
         return ordinal() >= other.ordinal() ? this : other;
     }
 
-    public boolean needsLayout() {
+    public RuntimeCategory category() {
+        return switch (this) {
+            case NONE -> RuntimeCategory.NONE;
+            case COMPOSITE -> RuntimeCategory.COMPOSITOR_ONLY;
+            case PAINT -> RuntimeCategory.PAINT_ONLY;
+            case LAYOUT -> RuntimeCategory.LAYOUT_AFFECTING;
+        };
+    }
+
+    public boolean compositorOnly() {
+        return this == COMPOSITE;
+    }
+
+    public boolean paintOnly() {
+        return this == PAINT;
+    }
+
+    public boolean layoutAffecting() {
         return this == LAYOUT;
+    }
+
+    public boolean needsLayout() {
+        return layoutAffecting();
     }
 
     public boolean needsPaint() {
         return this == PAINT || this == COMPOSITE || this == LAYOUT;
+    }
+
+    public static RuntimeCategory categoryOf(String property) {
+        return of(property).category();
     }
 
     public static UiCssStyleImpact of(String property) {

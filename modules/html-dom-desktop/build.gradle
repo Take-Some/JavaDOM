@@ -132,3 +132,31 @@ tasks.register('validateNoJFrameUsage') {
 tasks.named('check') {
     dependsOn 'validateNoJFrameUsage'
 }
+
+tasks.register('runHtmlOnlyAnimationDemo', JavaExec) {
+    group = 'application'
+    description = 'Runs the self-contained HTML-only animation demo.'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'dev.takesome.htmldom.bundled.HtmlOnlyAnimationDemo'
+    jvmArgs htmlDomAnsiJvmArgs
+    ['htmldom.log.level', 'htmldom.external.log.level', 'htmldom.log.noColor'].each { propertyName ->
+        def propertyValue = System.getProperty(propertyName)
+        if (propertyValue != null && !propertyValue.isBlank()) {
+            jvmArgs "-D${propertyName}=${propertyValue}"
+        }
+    }
+}
+
+tasks.register('htmlOnlyAnimationDemoJar', Jar) {
+    group = 'distribution'
+    description = 'Builds executable self-contained HTML-only animation demo jar.'
+    archiveBaseName.set('html-dom-html-only-demo')
+    archiveClassifier.set('')
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    from sourceSets.main.output
+    dependsOn configurations.runtimeClasspath
+    from { configurations.runtimeClasspath.collect { it.isDirectory() ? it : zipTree(it) } }
+    manifest {
+        attributes 'Main-Class': 'dev.takesome.htmldom.bundled.HtmlOnlyAnimationDemo'
+    }
+}
