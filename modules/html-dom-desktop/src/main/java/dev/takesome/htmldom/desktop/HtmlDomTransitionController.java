@@ -42,25 +42,26 @@ public final class HtmlDomTransitionController {
     public TickResult apply(UiDomDocument document, long nowMs, boolean scanTargets) {
         finishedEvents.clear();
         active = false;
-        if (document == null) return new TickResult(false, UiCssStyleImpact.NONE, List.of());
+        if (document == null) return new TickResult(false, UiCssStyleImpact.NONE, List.of(), List.of());
         UiCssStyleImpact impact = UiCssStyleImpact.NONE;
         LinkedHashSet<UiDomElement> changedElements = new LinkedHashSet<>();
+        LinkedHashSet<ChangedProperty> changedProperties = new LinkedHashSet<>();
         if (scanTargets || states.isEmpty()) {
             for (UiDomElement element : UiDomTraversal.depthFirstElements(document.documentElement())) {
-                impact = impact.merge(apply(element, nowMs, changedElements));
+                impact = impact.merge(apply(element, nowMs, changedElements, changedProperties));
             }
         } else {
             for (ElementState state : new ArrayList<>(activeStates.values())) {
-                if (state.element != null) impact = impact.merge(applyActive(state.element, state, nowMs, changedElements));
+                if (state.element != null) impact = impact.merge(applyActive(state.element, state, nowMs, changedElements, changedProperties));
             }
         }
         if (LOG.debugEnabled()) {
             LOG.debug("HtmlDom transition tick scanTargets={} states={} activeStates={} active={} impact={} changedElements={}", scanTargets, states.size(), activeStates.size(), active, impact, changedElements.size());
         }
-        return new TickResult(active, impact, List.copyOf(changedElements));
+        return new TickResult(active, impact, List.copyOf(changedElements), List.copyOf(changedProperties));
     }
 
-    private UiCssStyleImpact apply(UiDomElement element, long now, LinkedHashSet<UiDomElement> changedElements) {
+    private UiCssStyleImpact apply(UiDomElement element, long now, LinkedHashSet<UiDomElement> changedElements, LinkedHashSet<ChangedProperty> changedProperties) {
         UiCssStyleImpact impact = UiCssStyleImpact.NONE;
         ElementState state = states.computeIfAbsent(element.nodeId(), ignored -> new ElementState());
         state.element = element;
@@ -103,13 +104,13 @@ public final class HtmlDomTransitionController {
                     state.effective.put(property, target);
                     if (element.removeAnimatedComputedStyle(property)) {
                         impact = impact.merge(propertyImpact);
-                        changedElements.add(element);
+                        markChanged(changedElements, changedProperties, element, property);
                     }
                 }
             }
             Animation animation = state.animations.get(property);
             if (animation != null) {
-                impact = impact.merge(applyAnimation(element, state, animation, now, changedElements));
+                impact = impact.merge(applyAnimation(element, state, animation, now, changedElements, changedProperties));
             } else {
                 state.effective.put(property, target);
             }
@@ -117,28 +118,28 @@ public final class HtmlDomTransitionController {
         return impact;
     }
 
-    private UiCssStyleImpact applyActive(UiDomElement element, ElementState state, long now, LinkedHashSet<UiDomElement> changedElements) {
+    private UiCssStyleImpact applyActive(UiDomElement element, ElementState state, long now, LinkedHashSet<UiDomElement> changedElements, LinkedHashSet<ChangedProperty> changedProperties) {
         UiCssStyleImpact impact = UiCssStyleImpact.NONE;
         if (state.animations.isEmpty()) return impact;
         for (Animation animation : new ArrayList<>(state.animations.values())) {
-            impact = impact.merge(applyAnimation(element, state, animation, now, changedElements));
+            impact = impact.merge(applyAnimation(element, state, animation, now, changedElements, changedProperties));
         }
         return impact;
     }
 
-    private UiCssStyleImpact applyAnimation(UiDomElement element, ElementState state, Animation animation, long now, LinkedHashSet<UiDomElement> changedElements) {
+    private UiCssStyleImpact applyAnimation(UiDomElement element, ElementState state, Animation animation, long now, LinkedHashSet<UiDomElement> changedElements, LinkedHashSet<ChangedProperty> changedProperties) {
         UiCssStyleImpact impact = UiCssStyleImpact.NONE;
         UiCssStyleImpact propertyImpact = UiCssStyleImpact.of(animation.property);
         String value = animation.value(now);
         if (element.setAnimatedComputedStyle(animation.property, value)) {
             impact = impact.merge(propertyImpact);
-            changedElements.add(element);
+            markChanged(changedElements, changedProperties, element, animation.property);
         }
         state.effective.put(animation.property, value);
         if (animation.done(now)) {
             if (element.removeAnimatedComputedStyle(animation.property)) {
                 impact = impact.merge(propertyImpact);
-                changedElements.add(element);
+                markChanged(changedElements, changedProperties, element, animation.property);
             }
             state.effective.put(animation.property, animation.end);
             state.animations.remove(animation.property);
@@ -148,6 +149,11 @@ public final class HtmlDomTransitionController {
             active = true;
         }
         return impact;
+    }
+
+    private void markChanged(LinkedHashSet<UiDomElement> changedElements, LinkedHashSet<ChangedProperty> changedProperties, UiDomElement element, String property) {
+        changedElements.add(element);
+        changedProperties.add(new ChangedProperty(element, property));
     }
 
     private String targetValue(UiDomElement element, String property) {
@@ -259,7 +265,9 @@ public final class HtmlDomTransitionController {
         return v.equals("linear") || v.equals("ease") || v.equals("ease-in") || v.equals("ease-out") || v.equals("ease-in-out") || v.startsWith("cubic-bezier(");
     }
 
-    public record TickResult(boolean active, UiCssStyleImpact impact, List<UiDomElement> changedElements) { }
+    public record TickResult(boolean active, UiCssStyleImpact impact, List<UiDomElement> changedElements, List<ChangedProperty> changedProperties) { }
+
+    public record ChangedProperty(UiDomElement element, String propertyName) { }
 
     public record TransitionEndEvent(UiDomElement element, String propertyName, long elapsedMs) { }
 

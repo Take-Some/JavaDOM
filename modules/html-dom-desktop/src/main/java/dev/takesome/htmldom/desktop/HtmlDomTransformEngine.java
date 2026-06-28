@@ -4,6 +4,7 @@ import dev.takesome.htmldom.dom.UiDomElement;
 
 import java.awt.Graphics2D;
 import java.awt.Rectangle;
+import java.awt.Shape;
 import java.awt.geom.AffineTransform;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -31,6 +32,15 @@ public final class HtmlDomTransformEngine {
         TransformPlan plan = plan(element);
         if (plan.identity()) return new AffineTransform();
         return plan.transform(r);
+    }
+
+
+    public Rectangle transformedBounds(UiDomElement element, Rectangle r) {
+        if (element == null || r == null) return null;
+        AffineTransform tx = transform(element, r);
+        if (tx == null || tx.isIdentity()) return new Rectangle(r);
+        Shape transformed = tx.createTransformedShape(r);
+        return transformed.getBounds();
     }
 
     public Stats stats() {

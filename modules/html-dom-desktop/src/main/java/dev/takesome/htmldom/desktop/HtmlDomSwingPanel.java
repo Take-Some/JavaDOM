@@ -62,7 +62,6 @@ public final class HtmlDomSwingPanel extends JPanel implements HtmlDomInputRoute
     private static final long MIN_RUNTIME_EFFECT_INTERVAL_MS = 15L;
     private static final long FORCED_LAYOUT_LOG_INTERVAL_MS = 1_000L;
     private static final long DEVTOOLS_REFRESH_INTERVAL_MS = 125L;
-    private static final int COMPOSITOR_DIRTY_PADDING_PX = 96;
     private final HtmlDomConfig config;
     private final HtmlDomClient client;
     private final UiDomDocument dom;
@@ -80,6 +79,7 @@ public final class HtmlDomSwingPanel extends JPanel implements HtmlDomInputRoute
     private final HtmlDomScrollbarPaintEngine scrollbarPaintEngine = new HtmlDomScrollbarPaintEngine();
     private final HtmlDomControlPaintEngine controlPaintEngine = new HtmlDomControlPaintEngine();
     private final HtmlDomTransformEngine transformEngine = new HtmlDomTransformEngine();
+    private final HtmlDomDirtyRegionEngine dirtyRegionEngine = new HtmlDomDirtyRegionEngine();
     private final HtmlDomTransitionController transitionController = new HtmlDomTransitionController();
     private final UiCssAnimationResolver animationResolver = new UiCssAnimationResolver();
     private final HtmlDomAnimationFrameExecutor animationFrameExecutor;
@@ -88,6 +88,7 @@ public final class HtmlDomSwingPanel extends JPanel implements HtmlDomInputRoute
     private final Map<Integer, Set<String>> animationOverlayProperties = new HashMap<>();
     private final Map<Integer, AnimationTarget> animationTargets = new HashMap<>();
     private final Set<UiDomElement> runtimeDirtyElements = new HashSet<>();
+    private final Map<Integer, Set<String>> runtimeDirtyPropertiesByNode = new HashMap<>();
     private final Map<Integer, Rectangle> runtimeDirtyBoundsByNode = new HashMap<>();
     private final Object runtimeLock = new Object();
     private final HtmlDomEventDispatcher eventDispatcher = new HtmlDomEventDispatcher();
@@ -315,6 +316,7 @@ public final class HtmlDomSwingPanel extends JPanel implements HtmlDomInputRoute
 
             UiCssStyleImpact impact = UiCssStyleImpact.NONE;
             runtimeDirtyElements.clear();
+            runtimeDirtyPropertiesByNode.clear();
             try (PhaseScope ignored = enterLifecyclePhase(HtmlDomLifecyclePhase.STYLE_RECALC, reason, pass)) {
                 if (cascadeNeeded) {
                     UiCssStyleImpact cascadeImpact = cascade.apply(dom, stylesheet);
@@ -451,9 +453,7 @@ public final class HtmlDomSwingPanel extends JPanel implements HtmlDomInputRoute
         if (element == null || layout == null) return null;
         Rectangle rect = rect(element);
         if (rect == null || rect.width <= 0 || rect.height <= 0) return null;
-        Rectangle dirty = new Rectangle(rect);
-        dirty.grow(COMPOSITOR_DIRTY_PADDING_PX, COMPOSITOR_DIRTY_PADDING_PX);
-        return dirty;
+        return dirtyRegionEngine.dirtyRect(element, rect, runtimeDirtyPropertiesByNode.get(element.nodeId()), transformEngine);
     }
 
     private Rectangle clampToViewport(Rectangle rect) {
@@ -474,7 +474,15 @@ public final class HtmlDomSwingPanel extends JPanel implements HtmlDomInputRoute
     }
 
     private void markRuntimeDirty(UiDomElement element) {
-        if (element != null) runtimeDirtyElements.add(element);
+        markRuntimeDirty(element, "*");
+    }
+
+    private void markRuntimeDirty(UiDomElement element, String property) {
+        if (element == null) return;
+        runtimeDirtyElements.add(element);
+        runtimeDirtyPropertiesByNode
+                .computeIfAbsent(element.nodeId(), ignored -> new HashSet<>())
+                .add(property == null || property.isBlank() ? "*" : property);
     }
 
 
@@ -803,7 +811,13 @@ public final class HtmlDomSwingPanel extends JPanel implements HtmlDomInputRoute
 
     private UiCssStyleImpact applyTransitions(long nowMs, boolean cascadeWasUpdated) {
         HtmlDomTransitionController.TickResult result = transitionController.apply(dom, nowMs, cascadeWasUpdated);
-        for (UiDomElement element : result.changedElements()) markRuntimeDirty(element);
+        if (!result.changedProperties().isEmpty()) {
+            for (HtmlDomTransitionController.ChangedProperty changed : result.changedProperties()) {
+                markRuntimeDirty(changed.element(), changed.propertyName());
+            }
+        } else {
+            for (UiDomElement element : result.changedElements()) markRuntimeDirty(element);
+        }
         for (HtmlDomTransitionController.TransitionEndEvent event : transitionController.drainFinishedEvents()) {
             eventDispatcher.dispatchTransitionEnd(event.element(), event.propertyName(), event.elapsedMs(), domEvent -> {
                 UiDomElement target = domEvent.target();
@@ -843,7 +857,7 @@ public final class HtmlDomSwingPanel extends JPanel implements HtmlDomInputRoute
                     String property = iterator.next();
                     if (!frame.containsKey(property) && element.removeAnimatedComputedStyle(property)) {
                         impact = impact.merge(UiCssStyleImpact.of(property));
-                        markRuntimeDirty(element);
+                        markRuntimeDirty(element, property);
                         iterator.remove();
                     }
                 }
@@ -856,7 +870,7 @@ public final class HtmlDomSwingPanel extends JPanel implements HtmlDomInputRoute
                 String property = entry.getKey();
                 if (element.setAnimatedComputedStyle(property, entry.getValue())) {
                     impact = impact.merge(UiCssStyleImpact.of(property));
-                    markRuntimeDirty(element);
+                    markRuntimeDirty(element, property);
                 }
                 previous.add(property);
             }
@@ -908,7 +922,7 @@ public final class HtmlDomSwingPanel extends JPanel implements HtmlDomInputRoute
             for (String property : properties) {
                 if (element.removeAnimatedComputedStyle(property)) {
                     impact = impact.merge(UiCssStyleImpact.of(property));
-                    markRuntimeDirty(element);
+                    markRuntimeDirty(element, property);
                 }
             }
         }
